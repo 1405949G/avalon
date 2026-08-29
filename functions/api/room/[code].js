@@ -10,7 +10,7 @@ const MEM = globalThis.__AVALON_MEM__ || (globalThis.__AVALON_MEM__ = new Map())
 function corsHeaders() {
   return {
     'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+    'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type',
     'Cache-Control': 'no-store',
   };
@@ -115,6 +115,23 @@ export async function onRequestPost({ request, params, env }) {
       MEM.set(code, room);
     }
     return new Response(JSON.stringify(room), { headers: { 'Content-Type': 'application/json', ...corsHeaders() } });
+  } catch (e) {
+    return new Response(JSON.stringify({ error: String(e) }), { status: 500, headers: corsHeaders() });
+  }
+}
+
+export async function onRequestDelete({ params, env }) {
+  const code = (params.code || '').toUpperCase();
+  if (!/^[A-Z]{4}$/.test(code)) {
+    return new Response(JSON.stringify({ error: 'Invalid code' }), { status: 400, headers: { 'Content-Type': 'application/json', ...corsHeaders() } });
+  }
+  try {
+    if (env && env.AVALON_ROOMS) {
+      await env.AVALON_ROOMS.delete(`room:${code}`);
+    } else {
+      MEM.delete(code);
+    }
+    return new Response(JSON.stringify({ ok: true, code }), { headers: { 'Content-Type': 'application/json', ...corsHeaders() } });
   } catch (e) {
     return new Response(JSON.stringify({ error: String(e) }), { status: 500, headers: corsHeaders() });
   }

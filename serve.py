@@ -25,7 +25,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
     def end_headers(self):
         self.send_header('Access-Control-Allow-Origin', '*')
-        self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+        self.send_header('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS')
         self.send_header('Access-Control-Allow-Headers', 'Content-Type')
         self.send_header('Cache-Control', 'no-store')
         super().end_headers()
@@ -144,6 +144,21 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             self.send_header('Content-Type', 'application/json')
             self.end_headers()
             self.wfile.write(json.dumps(room).encode())
+            return
+        self.send_response(404)
+        self.end_headers()
+
+    def do_DELETE(self):
+        parsed = urllib.parse.urlparse(self.path)
+        if parsed.path.startswith('/api/room/'):
+            code = parsed.path.split('/')[-1].upper()
+            if code in ROOMS:
+                del ROOMS[code]
+                print(f"DELETE {code} remaining {list(ROOMS.keys())}", flush=True)
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps({"ok": True, "code": code}).encode())
             return
         self.send_response(404)
         self.end_headers()

@@ -240,23 +240,13 @@ export function renderLobby(ctx) {
         ${waiting}
       </div>
 
-      <!-- Add player (host) — name edit is via tapping avatar for nicer UI -->
+      <!-- Add Bot (host) -->
       <div class="mt-3 flex gap-2">
-        <input id="input-add-player" maxlength="16" placeholder="Add player name (e.g. Alex)"
+        <input id="input-add-player" maxlength="16" placeholder="Bot name"
           class="flex-1 px-3.5 py-2.5 rounded-xl bg-white/10 border border-white/15 text-white placeholder:text-white/40 text-sm font-medium outline-none focus:border-[#3aa8d6] focus:bg-white/15" />
-        <button id="btn-add-bot" class="px-3.5 py-2.5 rounded-xl bg-white/10 hover:bg-white/15 border border-white/10 text-white text-sm font-semibold">+ Bot</button>
-        <button id="btn-add-player" class="px-4 py-2.5 rounded-xl bg-[#f3ecd8] hover:bg-white text-[#0e2533] text-sm font-bold">Add</button>
+        <button id="btn-add-bot" class="px-4 py-2.5 rounded-xl bg-[#f3ecd8] hover:bg-white text-[#0e2533] text-sm font-bold">Add Bot</button>
       </div>
       <p class="text-xs text-white/40 mt-1.5 text-center">Tap avatar to edit or kick • Add up to 10 • Works on each player's own device</p>
-
-      <!-- Trust card -->
-      <div class="mt-4 rounded-2xl bg-black/25 border border-white/10 p-3 sm:p-3.5 flex items-center justify-between">
-        <div>
-          <p class="text-sm font-bold text-[#8ec8e6]">Trust someone. Quest anyway.</p>
-          <p class="text-xs text-white/50 font-medium">5–10 players · 15–25 min</p>
-        </div>
-        <button id="btn-change-game" class="text-xs font-extrabold tracking-widest text-white/60 hover:text-white/90">CHANGE GAME</button>
-      </div>
 
       <!-- Game options — collapsible -->
       <div class="mt-4 rounded-2xl bg-[#0e2231]/80 border border-white/10 backdrop-blur p-4 shadow-xl">
@@ -400,16 +390,16 @@ export function renderExactQuestTrack(pub) {
   `;
 }
 
-export function renderExactAllegiance(pub, myId) {
-  const me = pub.players.find(p=> p.id===myId) || { role: 'LOYAL', name: 'You' };
-  // Need full player data for role, fallback to pub
-  const full = pub.players.find(p=> p.id===myId);
-  // Try to get role from state via window? We'll need to pass full state, but for now use pub's extra? Instead, we will expect caller to provide full role via pub. For exact, we need role info.
-  // This function will be called with pub that has been enriched with myRole via getPrivateState in app.js wrapper.
-  // For now, we handle both: if pub has myRole, use it, else show Loyal.
-  const role = me.role || 'LOYAL';
-  const isEvil = role==='ASSASSIN' || role==='MORGANA' || role==='MORDRED' || role==='OBERON' || role==='MINION';
-  const allegiance = isEvil ? 'Sworn to evil' : 'Loyal to Arthur';
+export function renderExactAllegiance(pub, myId, opts={}) {
+  // opts may contain actual private role/allegiance from state (since pub has no role for anti-leakage)
+  let role = opts.role || 'LOYAL';
+  let allegiance = opts.allegiance || 'GOOD';
+  if (!opts.role) {
+    const me = pub.players.find(p=> p.id===myId);
+    if (me && me.role) { role = me.role; allegiance = me.allegiance || allegiance; }
+  }
+  const isEvil = allegiance === 'EVIL' || ['ASSASSIN','MORGANA','MORDRED','OBERON','MINION'].includes(role);
+  const allegianceLabel = isEvil ? 'Sworn to evil' : 'Loyal to Arthur';
   const allegianceColor = isEvil ? 'text-[#ff6b6b]' : 'text-[#5eead4]';
   const roleLabel = {
     'MERLIN':'Merlin',
@@ -434,7 +424,7 @@ export function renderExactAllegiance(pub, myId) {
   return `
     <div class="rounded-2xl bg-[#142a3d]/80 border border-white/10 p-5 text-center">
       <p class="text-xs font-bold tracking-[0.18em] text-[#7ec8e6]">YOUR ALLEGIANCE</p>
-      <p class="font-display font-black text-[28px] leading-none ${allegianceColor} mt-1">${escape(allegiance)}</p>
+      <p class="font-display font-black text-[28px] leading-none ${allegianceColor} mt-1">${escape(allegianceLabel)}</p>
       <div class="w-12 h-0.5 bg-white/10 mx-auto my-3"></div>
       <h2 class="font-display font-bold text-[22px] text-white leading-none">${escape(roleLabel)}</h2>
       <p class="text-sm text-white/60 mt-1.5 leading-snug max-w-[320px] mx-auto">${escape(roleDesc)}</p>
@@ -495,7 +485,10 @@ export function renderExactAvatarRow(pub, myId, statusMap) {
           ${initials}
           ${dot}
         </div>
-        <span class="text-xs font-bold ${isYou?'text-white': 'text-white/70'} truncate max-w-[56px]">${escape(p.name)}${isYou?'<span class="ml-1 px-1.5 py-0.5 rounded-full bg-[#f3ecd8] text-obsidian text-[9px] font-black">YOU</span>':''}</span>
+        <div class="flex flex-col items-center leading-none">
+          <span class="text-xs font-bold ${isYou?'text-white':'text-white/70'} truncate max-w-[72px] text-center">${escape(p.name)}</span>
+          ${isYou?'<span class="mt-1 px-1.5 py-0.5 rounded-full bg-[#f3ecd8] text-obsidian text-[7px] font-black leading-none">YOU</span>':''}
+        </div>
         <span class="text-[10px] font-black tracking-widest ${isReady?'text-emerald-400':'text-white/30'}">${status}</span>
       </div>
     `;

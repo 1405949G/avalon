@@ -83,6 +83,22 @@ function startLobbyPoll() {
     if (state.phase !== PHASES.LOBBY) { clearInterval(lobbyPoll); lobbyPoll=null; return; }
     try {
       const room = await net.getRoomAsync(lobbyDraft.roomCode);
+      if (!room) {
+        if (isJoinerMode) {
+          toast('Host left — room closed','error');
+          isJoinerMode=false;
+          hasJoined=false;
+          history.replaceState(null,'',window.location.pathname);
+          uiMode='HOME';
+          showGamePopup=false;
+          lobbyDraft=defaultLobby();
+          if (roomUnsub) try{ roomUnsub(); }catch(_){}
+          roomUnsub=null;
+          stopLobbyPoll();
+          queueRender();
+        }
+        return;
+      }
       if (room && room.players) {
         const fetchedStr = JSON.stringify(room.players);
         const localStr = JSON.stringify(lobbyDraft.players.map((p,i)=>({id:`lobby_${i}_${p.name}`,name:p.name,isBot:!!p.isBot})));
@@ -90,13 +106,21 @@ function startLobbyPoll() {
           // Merge by name — host sees any joiner even if lengths equal but names differ
           if (!isJoinerMode) {
             const localNames = new Set(lobbyDraft.players.map(p=>p.name));
+            const serverNames = new Set(room.players.map(p=>p.name));
             let changed = false;
             for (const p of room.players) {
               if (!localNames.has(p.name)) {
                 lobbyDraft.players.push({ name: p.name, isBot: !!p.isBot });
-                localNames.add(p.name);
                 changed = true;
               }
+            }
+            const toRemove=[];
+            lobbyDraft.players.forEach((p,i)=>{
+              if (!serverNames.has(p.name) && !p.isBot && i!==0) toRemove.push(i);
+            });
+            for (let i=toRemove.length-1; i>=0; i--) {
+              lobbyDraft.players.splice(toRemove[i],1);
+              changed=true;
             }
             if (changed) saveLobbyDraft();
           }
@@ -130,9 +154,17 @@ function startLobbyPoll() {
             // Subscribe to game updates
             if (roomUnsub) roomUnsub();
             roomUnsub = net.subscribe(lobbyDraft.roomCode, (msg)=>{
+              if (msg.type==='ROOM_DELETED') {
+                toast('Host left — room closed','error');
+                isJoinerMode=false; hasJoined=false; uiMode='HOME'; showGamePopup=false; lobbyDraft=defaultLobby();
+                if (roomUnsub) try{ roomUnsub(); }catch(_){}
+                roomUnsub=null; stopLobbyPoll(); state=createInitialState(); state={...state, roomCode:lobbyDraft.roomCode, extraRoles:lobbyDraft.extraRoles}; storage.clear(); queueRender(); return;
+              }
               if (msg.state && JSON.stringify(msg.state) !== JSON.stringify(state)) {
                 state = msg.state; storage.save(state); queueRender();
                 if (state.phase===PHASES.TEAM_PROPOSAL) onEnterTeamProposal();
+                if (state.phase===PHASES.TEAM_VOTE) onEnterTeamVote(state.voteGeneration);
+                if (state.phase===PHASES.QUEST_VOTE) onEnterQuestVote();
               }
             });
             queueRender();
@@ -364,7 +396,7 @@ function buildLayout(pub){
         return `
         <div class="max-w-[480px] mx-auto px-4 sm:px-0">
           <div class="flex items-center justify-between pt-2">
-            <button onclick="history.back()" class="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center text-white/70">‹</button>
+            <button id="btn-join-back" class="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center text-white/70">‹</button>
             <div class="text-center">
               <h1 class="font-display font-extrabold text-[18px] text-[#f0e8d0]">Quest of Shadows</h1>
               <p class="text-xs text-white/60">Joined ${escape(lobbyDraft.roomCode)} ✓</p>
@@ -391,7 +423,7 @@ function buildLayout(pub){
       return `
         <div class="max-w-[480px] mx-auto px-4 sm:px-0">
           <div class="flex items-center justify-between pt-2">
-            <button onclick="history.back()" class="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center text-white/70">‹</button>
+            <button id="btn-join-back" class="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center text-white/70">‹</button>
             <div class="text-center">
               <h1 class="font-display font-extrabold text-[18px] text-[#f0e8d0]">Quest of Shadows</h1>
               <p class="text-xs text-white/60">Joining ${escape(lobbyDraft.roomCode)}</p>
@@ -504,7 +536,7 @@ function buildLayout(pub){
       <div class="max-w-[520px] mx-auto min-h-[85vh] flex flex-col">
         ${renderExactHeader(questNum, 5)}
         <div class="mt-4 space-y-3">
-          ${renderExactAllegiance({ players: pub.players, extraRoles: pub.extraRoles, currentQuest: 0 }, my)}
+          ${renderExactAllegiance({ players: pub.players, extraRoles: pub.extraRoles, currentQuest: 0 }, my, { role, allegiance })}
           ${visionCard}
           ${renderExactTableSummary(pub)}
         </div>
@@ -1154,8 +1186,26 @@ function bindDynamicEvents(pub){
     });
     return;
   }
-  // Lobby Table Party events
+  // Lobby Table Party events (including joiner back)
   if (pub.phase===PHASES.LOBBY) {
+    document.getElementById('btn-join-back')?.addEventListener('click', async ()=>{
+      if (hasJoined && myId) {
+        try { net.leaveRoom(lobbyDraft.roomCode, myId); } catch(_){}
+        hasJoined=false;
+        try{ localStorage.removeItem('avalon:myName:'+lobbyDraft.roomCode); }catch(_){}
+        try{ localStorage.removeItem('avalon:myId:'+lobbyDraft.roomCode); }catch(_){}
+      }
+      isJoinerMode=false;
+      hasJoined=false;
+      history.replaceState(null,'',window.location.pathname);
+      uiMode='HOME';
+      showGamePopup=false;
+      lobbyDraft=defaultLobby();
+      if (roomUnsub) try{ roomUnsub(); }catch(_){}
+      roomUnsub=null;
+      stopLobbyPoll();
+      queueRender();
+    });
     document.getElementById('btn-share-link')?.addEventListener('click', async (e)=>{
       const link = e.currentTarget.dataset.link;
       try {
@@ -1184,35 +1234,39 @@ function bindDynamicEvents(pub){
         queueRender();
       } catch(e){ toast(e.message, 'error'); }
     });
-    // Add player via input + bot, with nicer avatar edit modal
+    // Add Bot — single button, uses Bot name if typed else random
     document.getElementById('input-add-player')?.addEventListener('keydown', (e)=>{
-      if (e.key==='Enter') { e.preventDefault(); document.getElementById('btn-add-player')?.click(); }
-    });
-    document.getElementById('btn-add-player')?.addEventListener('click', ()=>{
-      const inp=document.getElementById('input-add-player');
-      let name=(inp?.value||'').trim();
-      if (!name) name=`Player ${lobbyDraft.players.length+1}`;
-      if (name.length>16) return toast('Name max 16 chars','error');
-      if (lobbyDraft.players.some(p=>p.name.toLowerCase()===name.toLowerCase())) return toast('Name already taken','error');
-      if (lobbyDraft.players.length>=10) return toast('Max 10 players','error');
-      lobbyDraft.players.push({ name, isBot: false });
-      if (inp) inp.value='';
-      saveLobbyDraft(); syncLobbyToServer(); queueRender();
+      if (e.key==='Enter') { e.preventDefault(); document.getElementById('btn-add-bot')?.click(); }
     });
     document.getElementById('btn-add-bot')?.addEventListener('click', ()=>{
       if (lobbyDraft.players.length>=10) return toast('Max 10 players', 'error');
-      const botNames=['Galahad','Percival','Tristan','Lancelot','Gawain','Kay','Bors','Ector'];
-      const n=botNames[Math.floor(Math.random()*botNames.length)] + Math.floor(Math.random()*900);
-      lobbyDraft.players.push({ name: n, isBot: true });
+      const inp=document.getElementById('input-add-player');
+      let name=(inp?.value||'').trim();
+      if (name) {
+        if (name.length>16) return toast('Name max 16 chars','error');
+        if (lobbyDraft.players.some(p=>p.name.toLowerCase()===name.toLowerCase())) return toast('Name already taken','error');
+      } else {
+        const botNames=['Galahad','Percival','Tristan','Lancelot','Gawain','Kay','Bors','Ector'];
+        name=botNames[Math.floor(Math.random()*botNames.length)] + Math.floor(Math.random()*900);
+      }
+      lobbyDraft.players.push({ name, isBot: true });
+      if (inp) inp.value='';
       saveLobbyDraft(); syncLobbyToServer(); queueRender();
     });
-    // Avatar edit — nice modal instead of plain prompt
+    // Avatar edit — nice modal, permissions: host can edit self+bots, players only self
     document.querySelectorAll('[data-edit-idx]')?.forEach(el=>{
       el.addEventListener('click', (e)=>{
         if (e.target.closest('[data-kick-idx]')) return;
         const idx=Number(el.dataset.editIdx);
         const p=lobbyDraft.players[idx];
         if (!p) return;
+        if (!isJoinerMode) {
+          if (!p.isBot && idx!==0) return toast('You can only edit yourself or bots','default');
+        } else {
+          let myName2=null; try{ myName2=localStorage.getItem('avalon:myName:'+lobbyDraft.roomCode); }catch(_){}
+          if (p.isBot) return toast('Only host can edit bots','default');
+          if (p.name!==myName2) return toast('You can only edit your own name','default');
+        }
         const cur=p.name||'';
         const overlay=document.createElement('div');
         overlay.className='fixed inset-0 z-40 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4';
@@ -1250,11 +1304,13 @@ function bindDynamicEvents(pub){
         inp2?.addEventListener('keydown', (e)=>{ if(e.key==='Enter') overlay.querySelector('#avatar-edit-save')?.click(); if(e.key==='Escape') close(); });
       });
     });
-    // Kick via X on avatar
+    // Kick via X on avatar — only host can kick, not self
     document.querySelectorAll('[data-kick-idx]')?.forEach(btn=>{
       btn.addEventListener('click', (e)=>{
         e.stopPropagation();
+        if (isJoinerMode) return toast('Only host can kick','default');
         const idx=Number(btn.dataset.kickIdx);
+        if (idx===0) return toast('Cannot kick yourself','default');
         if (lobbyDraft.players.length<=1) return toast('Need at least 1 player','error');
         const name=lobbyDraft.players[idx]?.name||'Player';
         showConfirm({ title:'Kick player?', body:`Remove <span class="text-white font-bold">${escape(name)}</span>?`, confirmText:'Kick', variant:'danger', onConfirm:()=>{ lobbyDraft.players.splice(idx,1); saveLobbyDraft(); syncLobbyToServer(); queueRender(); }});
@@ -1272,7 +1328,26 @@ function bindDynamicEvents(pub){
       if(p) p.classList.toggle('hidden');
     });
     document.getElementById('btn-lobby-back')?.addEventListener('click', ()=>{
-      showConfirm({ title:'Back to menu?', body:'Leave this lobby and go back to Pick a game? Your lobby is kept.', confirmText:'Back to menu', onConfirm:()=>{ uiMode='HOME'; showGamePopup=false; queueRender(); }});
+      showConfirm({ title:'Back to menu?', body:'Leave this lobby and go back to Pick a game? This will close the room for everyone.', confirmText:'Back to menu', variant:'danger', onConfirm: async ()=>{
+        const code=lobbyDraft.roomCode;
+        if (!isJoinerMode) {
+          try { await net.deleteRoom(code); } catch(_){}
+          try { localStorage.removeItem('avalon:lobby:'+code); }catch(_){}
+          try { localStorage.removeItem('avalon:lastRoomCode'); }catch(_){}
+          stopLobbyPoll();
+          if (roomUnsub) try{ roomUnsub(); }catch(_){}
+          roomUnsub=null;
+        } else {
+          if (hasJoined && myId) try{ net.leaveRoom(code, myId); }catch(_){}
+          hasJoined=false;
+          isJoinerMode=false;
+          try{ localStorage.removeItem('avalon:myName:'+code); }catch(_){}
+          try{ localStorage.removeItem('avalon:myId:'+code); }catch(_){}
+          history.replaceState(null,'',window.location.pathname);
+          stopLobbyPoll();
+        }
+        uiMode='HOME'; showGamePopup=false; lobbyDraft=defaultLobby(); queueRender();
+      }});
     });
     document.getElementById('btn-lobby-help')?.addEventListener('click', ()=>{ document.getElementById('rules-dialog')?.showModal(); });
     document.getElementById('btn-change-game')?.addEventListener('click', ()=>{
@@ -1343,12 +1418,8 @@ function bindDynamicEvents(pub){
     });
   }
 
-  // Role reveal — exact Table Party flow (no popup, just mark ready)
+  // Role reveal — exact Table Party flow (no popup, just mark ready) — back handled globally single confirm
   if (pub.phase===PHASES.ROLE_REVEAL) {
-    // Top header buttons
-    document.getElementById('btn-exact-back')?.addEventListener('click', ()=>{
-      showConfirm({ title:'Back to lobby?', body:'Return to main screen? This will discard roles.', confirmText:'Back', onConfirm:()=>{ dispatch({type:'RESET'}); }});
-    });
     document.getElementById('btn-exact-rules')?.addEventListener('click', ()=>{
       document.getElementById('rules-dialog')?.showModal();
     });
@@ -1383,9 +1454,32 @@ function bindDynamicEvents(pub){
       render();
     });
   }
-  // Exact header buttons (visible in-game)
+  // Exact header buttons (visible in-game) — single confirm, host deletes KV
   document.getElementById('btn-exact-back')?.addEventListener('click', ()=>{
-    showConfirm({ title:'Back to main?', body:'Return to lobby? Progress will be lost.', confirmText:'Back to lobby', onConfirm:()=> dispatch({type:'RESET'}) });
+    showConfirm({ title:'Back to main menu?', body:'Leave the game and go back to Pick a game? This will close the room for everyone if you are host.', confirmText:'Back to menu', variant:'danger', onConfirm: async ()=>{
+      const code=state.roomCode || lobbyDraft.roomCode;
+      const isHost = !isJoinerMode && state.players[0]?.id===myId;
+      if (isHost || state.phase===PHASES.ROLE_REVEAL) {
+        try { await net.deleteRoom(code); } catch(_){}
+        try { localStorage.removeItem('avalon:lobby:'+code); }catch(_){}
+        try { localStorage.removeItem('avalon:lastRoomCode'); }catch(_){}
+        stopLobbyPoll();
+        if (roomUnsub) try{ roomUnsub(); }catch(_){}
+        roomUnsub=null;
+      } else {
+        if (myId) try{ net.leaveRoom(code, myId); }catch(_){}
+        try{ localStorage.removeItem('avalon:myName:'+code); }catch(_){}
+        try{ localStorage.removeItem('avalon:myId:'+code); }catch(_){}
+      }
+      hasJoined=false;
+      isJoinerMode=false;
+      showGamePopup=false;
+      uiMode='HOME';
+      lobbyDraft=defaultLobby();
+      dispatch({type:'RESET'});
+      history.replaceState(null,'',window.location.pathname);
+      queueRender();
+    }});
   });
   document.getElementById('btn-exact-rules')?.addEventListener('click', ()=>{
     document.getElementById('rules-dialog')?.showModal();
@@ -1634,6 +1728,17 @@ async function init(){
   } else if (isJoiner) {
     startLobbyPoll();
   }
+  // Host closing tab/browser should delete room to prevent KV bloat
+  window.addEventListener('pagehide', ()=>{
+    if (!isJoinerMode && lobbyDraft.roomCode) {
+      try { fetch('/api/room/'+lobbyDraft.roomCode, {method:'DELETE', keepalive:true}); } catch(_){}
+    }
+  });
+  window.addEventListener('beforeunload', ()=>{
+    if (!isJoinerMode && lobbyDraft.roomCode && state.phase!==PHASES.GAME_OVER) {
+      try { fetch('/api/room/'+lobbyDraft.roomCode, {method:'DELETE', keepalive:true}); } catch(_){}
+    }
+  });
   // Try to load room state first (distributed via API), then fallback to local storage
   let loaded = null;
   const codeToLoad = lobbyDraft.roomCode;

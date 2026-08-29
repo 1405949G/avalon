@@ -205,13 +205,22 @@ export function subscribe(code, callback) {
   }
   window.addEventListener('storage', onStorage);
 
-  // Poll server for cross-device sync (every 1.5s)
+  // Poll server for cross-device sync (every 1.5s) — also detects host deletion (room 404)
   let lastStateStr = null;
-  try { const r = getLocalRoom(code); if (r?.state) lastStateStr = JSON.stringify(r.state); } catch(_){}
+  let lastHadRoom = false;
+  try { const r = getLocalRoom(code); if (r) lastHadRoom = true; if (r?.state) lastStateStr = JSON.stringify(r.state); } catch(_){}
   const poll = setInterval(async () => {
     try {
       const room = await fetchRoom(code);
-      if (!room || !room.state) return;
+      if (!room) {
+        if (lastHadRoom) {
+          lastHadRoom = false;
+          callback({ type: 'ROOM_DELETED', code });
+        }
+        return;
+      }
+      lastHadRoom = true;
+      if (!room.state) return;
       const s = JSON.stringify(room.state);
       if (s !== lastStateStr) {
         lastStateStr = s;
@@ -237,6 +246,16 @@ export function leaveRoom(code, playerId) {
     const ch = getChannel(code);
     if (ch) ch.postMessage({ type: 'PLAYER_LEFT', code, playerId });
   })();
+}
+
+export async function deleteRoom(code) {
+  if (!isValidRoomCode(code)) return;
+  try {
+    await fetch(`/api/room/${code}`, { method: 'DELETE' });
+  } catch(_){}
+  try { localStorage.removeItem(roomKey(code)); } catch(_){}
+  const ch = getChannel(code);
+  if (ch) ch.postMessage({ type: 'ROOM_DELETED', code });
 }
 
 export function generateInviteLink(code) {
