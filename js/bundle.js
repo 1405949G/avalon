@@ -2258,7 +2258,7 @@ function renderJoinCodeScreen(code='') {
           </div>
           <p id="join-code-error" class="text-xs text-rose-400 mt-3 h-4"></p>
         </div>
-        <button id="btn-join-enter" ${canEnter?'':'disabled'} class="w-full py-4 rounded-full ${canEnter?'bg-[#f5f0e8] hover:bg-white text-[#0a1e2e] font-black':'bg-white/10 text-white/30 font-bold cursor-not-allowed'} border ${canEnter?'border-white/20':'border-white/5'} transition-colors">Enter the code</button>
+        <button id="btn-join-enter" ${canEnter?'':'disabled'} class="w-full py-4 rounded-full ${canEnter?'bg-emerald-500 hover:bg-emerald-400 text-white font-black border border-emerald-500 cursor-pointer':'bg-white/10 text-white/30 font-bold cursor-not-allowed border border-white/5'} transition-colors">Enter the code</button>
       </div>
     </div>
   `;
@@ -2639,11 +2639,31 @@ function saveLobbyDraft() {
 async function syncLobbyToServer() {
   saveLobbyDraft();
   persistLobbyCode(lobbyDraft.roomCode);
-  // Push to server for cross-device joiners
+  // Push to server for cross-device joiners — merge with server to avoid overwriting concurrent joins
   try {
+    // Fetch latest to include any joiners that host hasn't yet polled
+    let latest = null;
+    try { latest = await net.getRoomAsync(lobbyDraft.roomCode); } catch(_){}
+    if (latest && Array.isArray(latest.players)) {
+      const localNames = new Set(lobbyDraft.players.map(p=>p.name));
+      for (const p of latest.players) {
+        if (!localNames.has(p.name)) {
+          lobbyDraft.players.push({ name: p.name, isBot: !!p.isBot });
+        }
+      }
+      // Don't auto-remove: host is source for kicks, but stale push shouldn't delete new joiners
+      saveLobbyDraft();
+    }
     const roomPlayers = lobbyDraft.players.map((p,i)=> ({ id: `lobby_${i}_${p.name}`, name: p.name, isBot: !!p.isBot }));
     await net.pushRoom(lobbyDraft.roomCode, { players: roomPlayers, state: null, hostId: roomPlayers[0]?.id || null, extraRoles: lobbyDraft.extraRoles });
   } catch(e){ console.warn('[syncLobby]', e); }
+}
+async function syncExtraRolesToServer() {
+  saveLobbyDraft();
+  persistLobbyCode(lobbyDraft.roomCode);
+  try {
+    await net.pushRoom(lobbyDraft.roomCode, { extraRoles: lobbyDraft.extraRoles });
+  } catch(e){ console.warn('[syncExtra]', e); }
 }
 function startLobbyPoll() {
   if (lobbyPoll) clearInterval(lobbyPoll);
@@ -3718,6 +3738,7 @@ function bindDynamicEvents(pub){
       try { await syncLobbyToServer(); } catch(_){}
       history.replaceState(null,'', window.location.pathname + '?room=' + newCode);
       uiMode='LOBBY'; showGamePopup=false; queueRender();
+      startLobbyPoll();
       toast('Room ' + newCode + ' created as ' + hostName,'success');
     });
     document.getElementById('btn-popup-howto')?.addEventListener('click', ()=>{
@@ -3741,7 +3762,13 @@ function bindDynamicEvents(pub){
       if (disp) {
         disp.innerHTML = v ? v.split('').map(ch=> `<span>${escape(ch)}</span>`).join('<span class="w-1"></span>') : '<span class="text-white/20 tracking-[0.6em]">----</span>';
       }
-      if (btn) btn.disabled = v.length!==4;
+      if (btn) {
+        const canEnter = v.length===4;
+        btn.disabled = !canEnter;
+        btn.className = canEnter
+          ? "w-full py-4 rounded-full bg-emerald-500 hover:bg-emerald-400 text-white font-black border border-emerald-500 transition-colors cursor-pointer"
+          : "w-full py-4 rounded-full bg-white/10 text-white/30 font-bold cursor-not-allowed border border-white/5 transition-colors";
+      }
       if (err) err.textContent = '';
     });
     inp?.addEventListener('keydown', (e)=>{
@@ -3889,10 +3916,12 @@ function bindDynamicEvents(pub){
       });
     });
     document.querySelectorAll('[data-extra]')?.forEach(btn=>{
-      btn.addEventListener('click', ()=>{
+      btn.addEventListener('click', async ()=>{
         const key=btn.dataset.extra;
         lobbyDraft.extraRoles[key]=!lobbyDraft.extraRoles[key];
-        saveLobbyDraft(); syncLobbyToServer(); render();
+        saveLobbyDraft();
+        try { await syncExtraRolesToServer(); } catch(_){}
+        render();
       });
     });
     document.getElementById('btn-toggle-options')?.addEventListener('click', ()=>{

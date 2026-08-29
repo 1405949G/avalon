@@ -641,7 +641,7 @@ export function renderJoinCodeScreen(code='') {
           </div>
           <p id="join-code-error" class="text-xs text-rose-400 mt-3 h-4"></p>
         </div>
-        <button id="btn-join-enter" ${canEnter?'':'disabled'} class="w-full py-4 rounded-full ${canEnter?'bg-[#f5f0e8] hover:bg-white text-[#0a1e2e] font-black':'bg-white/10 text-white/30 font-bold cursor-not-allowed'} border ${canEnter?'border-white/20':'border-white/5'} transition-colors">Enter the code</button>
+        <button id="btn-join-enter" ${canEnter?'':'disabled'} class="w-full py-4 rounded-full ${canEnter?'bg-emerald-500 hover:bg-emerald-400 text-white font-black border border-emerald-500 cursor-pointer':'bg-white/10 text-white/30 font-bold cursor-not-allowed border border-white/5'} transition-colors">Enter the code</button>
       </div>
     </div>
   `;
