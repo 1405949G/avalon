@@ -3861,14 +3861,16 @@ function bindDynamicEvents(pub){
       el.addEventListener('click', (e)=>{
         if (e.target.closest('[data-kick-idx]')) return;
         const idx=Number(el.dataset.editIdx);
-        const p=lobbyDraft.players[idx];
+        const sourcePlayers = (isJoinerMode && lobbyRoomCache && lobbyRoomCache.players) ? lobbyRoomCache.players : lobbyDraft.players;
+        const p=sourcePlayers[idx];
         if (!p) return;
+        let myName2=null; try{ myName2=localStorage.getItem('avalon:myName:'+lobbyDraft.roomCode); }catch(_){}
+        const isYou = isJoinerMode ? (p.name===myName2) : (idx===0);
         if (!isJoinerMode) {
-          if (!p.isBot && idx!==0) return toast('You can only edit yourself or bots','default');
+          if (!p.isBot && !isYou) return toast('You can only edit yourself or bots','default');
         } else {
-          let myName2=null; try{ myName2=localStorage.getItem('avalon:myName:'+lobbyDraft.roomCode); }catch(_){}
           if (p.isBot) return toast('Only host can edit bots','default');
-          if (p.name!==myName2) return toast('You can only edit your own name','default');
+          if (!isYou) return toast('You can only edit your own name','default');
         }
         const cur=p.name||'';
         const overlay=document.createElement('div');
@@ -3877,7 +3879,7 @@ function bindDynamicEvents(pub){
           <div class="w-full max-w-[360px] rounded-[20px] bg-[#1e1a2e] border border-white/10 p-5 text-center shadow-2xl">
             <div class="w-16 h-16 mx-auto rounded-full bg-gradient-to-br from-amber-200 to-orange-100 border-2 border-emerald-400 flex items-center justify-center text-xl font-black text-black">${escape(cur.slice(0,2).toUpperCase()||'?')}</div>
             <h3 class="font-bold text-white mt-3">Edit player</h3>
-            <p class="text-xs text-white/50">${p.isBot?'BOT':'Human'} ${idx===0?'• YOU':''}</p>
+            <p class="text-xs text-white/50">${p.isBot?'BOT':'Human'} ${isYou?'• YOU':''}</p>
             <input id="avatar-edit-input" maxlength="16" value="${escape(cur)}" placeholder="Player name" class="mt-4 w-full px-3.5 py-3 rounded-xl bg-white/10 border border-white/20 text-white placeholder:text-white/30 text-sm font-medium outline-none focus:border-[#7ec8e6] text-center" />
             <div class="mt-4 grid grid-cols-2 gap-2">
               <button id="avatar-edit-cancel" class="py-3 rounded-xl bg-white/10 hover:bg-white/15 border border-white/10 text-white font-semibold">Cancel</button>
@@ -3892,12 +3894,29 @@ function bindDynamicEvents(pub){
         const close=()=> overlay.remove();
         overlay.addEventListener('click', (e)=>{ if(e.target===overlay) close(); });
         overlay.querySelector('#avatar-edit-cancel')?.addEventListener('click', close);
-        overlay.querySelector('#avatar-edit-save')?.addEventListener('click', ()=>{
+        overlay.querySelector('#avatar-edit-save')?.addEventListener('click', async ()=>{
           const next=(inp2.value||'').trim().slice(0,16);
           if (!next) return toast('Name cannot be empty','error');
-          if (lobbyDraft.players.some((x,i)=> i!==idx && x.name.toLowerCase()===next.toLowerCase())) return toast('Name already taken','error');
-          lobbyDraft.players[idx].name=next;
-          saveLobbyDraft(); syncLobbyToServer(); close(); queueRender();
+          const checkPlayers = (isJoinerMode && lobbyRoomCache && lobbyRoomCache.players) ? lobbyRoomCache.players : lobbyDraft.players;
+          if (checkPlayers.some((x,i)=> i!==idx && x.name.toLowerCase()===next.toLowerCase())) return toast('Name already taken','error');
+          if (!isJoinerMode) {
+            lobbyDraft.players[idx].name=next;
+            saveLobbyDraft(); syncLobbyToServer(); close(); queueRender();
+          } else {
+            try {
+              const room = await net.getRoomAsync(lobbyDraft.roomCode);
+              if (!room || !Array.isArray(room.players)) throw new Error('Room not found');
+              const serverIdx = room.players.findIndex(x=> x.name===myName2);
+              if (serverIdx===-1) throw new Error('Your player not found');
+              if (room.players.some((x,i)=> i!==serverIdx && x.name.toLowerCase()===next.toLowerCase())) return toast('Name already taken','error');
+              room.players[serverIdx].name = next;
+              try{ localStorage.setItem('avalon:myName:'+lobbyDraft.roomCode, next); }catch(_){}
+              await net.pushRoom(lobbyDraft.roomCode, room);
+              lobbyRoomCache = await net.getRoomAsync(lobbyDraft.roomCode);
+              close(); queueRender();
+              toast('Name updated','success');
+            } catch(err){ toast(err.message||'Failed to update name','error'); }
+          }
         });
 
         inp2?.addEventListener('keydown', (e)=>{ if(e.key==='Enter') overlay.querySelector('#avatar-edit-save')?.click(); if(e.key==='Escape') close(); });
