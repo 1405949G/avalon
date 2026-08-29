@@ -1842,7 +1842,7 @@ function renderLobby(ctx) {
         <button id="btn-add-bot" class="px-3.5 py-2.5 rounded-xl bg-white/10 hover:bg-white/15 border border-white/10 text-white text-sm font-semibold">+ Bot</button>
         <button id="btn-add-human" class="px-3.5 py-2.5 rounded-xl bg-white/10 hover:bg-white/15 border border-white/10 text-white text-sm font-semibold">+ Friend</button>
       </div>
-      <p class="text-xs text-white/40 mt-1.5 text-center">Tap avatar to edit • Add up to 10 • Works on each player’s own phone</p>
+      <p class="text-xs text-white/40 mt-1.5 text-center">Tap avatar to edit • Add up to 10 • Works on each player’s own device</p>
 
       <!-- Trust card -->
       <div class="mt-4 rounded-2xl bg-black/25 border border-white/10 p-3 sm:p-3.5 flex items-center justify-between">
@@ -1899,7 +1899,7 @@ function renderLobby(ctx) {
           ? `<button id="btn-start" class="w-full py-4 rounded-full bg-[#f3ecd8] hover:bg-white text-[#0e2533] font-extrabold tracking-wide shadow-xl transition-colors">Start Quest — ${players.length} players</button>`
           : `<div class="w-full py-3.5 rounded-full bg-[#0f2231] border border-white/10 text-center text-white/50 font-bold text-sm shadow-xl">${bottomText}</div>`
         }
-        <p class="text-center text-xs text-white/30 mt-2">Each player opens the link on their own phone — roles stay private</p>
+        <p class="text-center text-xs text-white/30 mt-2">Each player opens the link on their own device — roles stay private</p>
       </div>
     </div>
   `;
@@ -1915,7 +1915,7 @@ function renderPrivateRole(pub, myId) {
     <div class="rounded-2xl bg-[#0f172a]/80 border border-white/[0.08] p-6 text-center shadow-xl max-w-[560px] mx-auto">
       <div class="w-14 h-14 mx-auto rounded-2xl bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center text-2xl">🛡️</div>
       <h2 class="font-display font-extrabold text-xl text-white mt-3">YOUR ROLE IS SECURE</h2>
-      <p class="text-sm text-stone-400 mt-2">On your phone, tap to reveal. No one else can see it — even the host.</p>
+      <p class="text-sm text-stone-400 mt-2">On your device, tap to reveal. No one else can see it — even the host.</p>
       <div class="mt-5 rounded-xl bg-white/[0.04] border border-white/[0.06] p-4">
         <p class="text-xs tracking-widest font-bold text-stone-500">YOU ARE</p>
         <p class="font-display font-extrabold text-2xl text-white mt-1">${escape(me?.name || 'You')}</p>
@@ -1938,7 +1938,7 @@ function renderRoleReveal(pub) {
   return `
     <div class="rounded-2xl bg-[#0f172a]/80 border border-white/[0.08] backdrop-blur-xl p-6 sm:p-8 text-center shadow-xl">
       <h2 class="font-display font-extrabold text-xl text-white">ROLE DISCOVERY (distributed)</h2>
-      <p class="text-sm text-stone-400 mt-2">Each player now reveals on their own phone. Use the View As switcher to preview.</p>
+      <p class="text-sm text-stone-400 mt-2">Each player now reveals on their own device. Use the View As switcher to preview.</p>
       <div class="mt-6 rounded-xl bg-white/[0.04] border border-white/[0.06] p-4 max-w-[420px] mx-auto">
         <p class="text-xs tracking-[0.14em] font-bold text-stone-500">PROGRESS</p>
         <p class="text-sm text-stone-300 mt-1">${progress}/${pub.players.length} viewed</p>
@@ -2549,7 +2549,7 @@ function escape(s) {
 }
 // ---- js/app.js ----
 /**
- * js/app.js — Core router (v3) — Distributed play (own phones) + Table Party lobby
+ * js/app.js — Core router (v3) — Distributed play (own devices) + Table Party lobby
  * Each player on own device sees private role, no passing.
  * Keeps pure reducer orchestration + backend abstraction via net.js
  */
@@ -3363,7 +3363,7 @@ function renderTeamProposalPanel(pub){
       </div>
     `;
   }
-  // If human leader but not my turn (other phone), show waiting
+  // If human leader but not my turn (other device), show waiting
   if (!isMyTurn) {
     return `
       <div class="rounded-2xl bg-white/[0.04] border border-white/[0.08] p-5 text-center">

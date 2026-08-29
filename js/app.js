@@ -1,5 +1,5 @@
 /**
- * js/app.js — Core router (v3) — Distributed play (own phones) + Table Party lobby
+ * js/app.js — Core router (v3) — Distributed play (own devices) + Table Party lobby
  * Each player on own device sees private role, no passing.
  * Keeps pure reducer orchestration + backend abstraction via net.js
  */
@@ -821,7 +821,7 @@ function renderTeamProposalPanel(pub){
       </div>
     `;
   }
-  // If human leader but not my turn (other phone), show waiting
+  // If human leader but not my turn (other device), show waiting
   if (!isMyTurn) {
     return `
       <div class="rounded-2xl bg-white/[0.04] border border-white/[0.08] p-5 text-center">
