@@ -159,17 +159,19 @@ export function renderLobby(ctx) {
   // Avatar bubbles — show up to 10, with YOU badge on first human, plus dashed waiting slots
   const maxShow = 10;
   const avatars = players.map((p, i) => {
-    const isYou = i === 0; // first player is host / you
+    const isYou = i === 0;
     const color = isYou ? 'border-emerald-400' : 'border-white/15';
     const bg = isYou ? 'bg-gradient-to-br from-amber-200 to-orange-100' : 'bg-gradient-to-br from-slate-600 to-slate-700';
     const botBadge = p.isBot ? '<span class="absolute -bottom-1 -right-1 px-1 py-0 rounded-full bg-white/90 text-[8px] font-extrabold text-obsidian border border-white">BOT</span>' : '';
     const youBadge = isYou ? '<span class="absolute -bottom-2 left-1/2 -translate-x-1/2 px-2 py-0.5 rounded-full bg-white text-obsidian text-[9px] font-extrabold tracking-widest">YOU</span>' : '';
-    const editHint = isYou ? 'data-edit-idx="'+i+'"' : '';
+    const canKick = players.length > 1;
+    const kickBtn = canKick ? `<button data-kick-idx="${i}" class="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-black/70 hover:bg-evil border border-white/20 flex items-center justify-center text-white text-[9px] leading-none opacity-90 hover:opacity-100 transition-opacity" title="Kick">✕</button>` : '';
     return `
       <div class="flex flex-col items-center gap-1.5 relative group">
-        <div ${editHint} class="relative w-[56px] h-[56px] sm:w-[60px] sm:h-[60px] rounded-full border-2 ${color} ${bg} flex items-center justify-center text-lg font-extrabold text-white overflow-hidden shadow-md cursor-pointer hover:scale-105 transition-transform">
+        <div data-edit-idx="${i}" class="relative w-[56px] h-[56px] sm:w-[60px] sm:h-[60px] rounded-full border-2 ${color} ${bg} flex items-center justify-center text-lg font-extrabold text-white overflow-hidden shadow-md cursor-pointer hover:scale-105 transition-transform">
           ${p.name ? escape(p.name[0].toUpperCase()) : '?'}
           ${botBadge}
+          ${kickBtn}
         </div>
         ${youBadge}
         <span class="text-xs font-bold text-white mt-1">${escape(p.name || 'Player')}</span>
@@ -238,14 +240,14 @@ export function renderLobby(ctx) {
         ${waiting}
       </div>
 
-      <!-- Change name quick edit (below avatars, for host) -->
+      <!-- Add player (host) — name edit is via tapping avatar for nicer UI -->
       <div class="mt-3 flex gap-2">
-        <input id="input-my-name" value="${escape(myName)}" maxlength="16" placeholder="Your name"
+        <input id="input-add-player" maxlength="16" placeholder="Add player name (e.g. Alex)"
           class="flex-1 px-3.5 py-2.5 rounded-xl bg-white/10 border border-white/15 text-white placeholder:text-white/40 text-sm font-medium outline-none focus:border-[#3aa8d6] focus:bg-white/15" />
         <button id="btn-add-bot" class="px-3.5 py-2.5 rounded-xl bg-white/10 hover:bg-white/15 border border-white/10 text-white text-sm font-semibold">+ Bot</button>
-        <button id="btn-add-human" class="px-3.5 py-2.5 rounded-xl bg-white/10 hover:bg-white/15 border border-white/10 text-white text-sm font-semibold">+ Friend</button>
+        <button id="btn-add-player" class="px-4 py-2.5 rounded-xl bg-[#f3ecd8] hover:bg-white text-[#0e2533] text-sm font-bold">Add</button>
       </div>
-      <p class="text-xs text-white/40 mt-1.5 text-center">Tap avatar to edit • Add up to 10 • Works on each player’s own device</p>
+      <p class="text-xs text-white/40 mt-1.5 text-center">Tap avatar to edit or kick • Add up to 10 • Works on each player's own device</p>
 
       <!-- Trust card -->
       <div class="mt-4 rounded-2xl bg-black/25 border border-white/10 p-3 sm:p-3.5 flex items-center justify-between">
@@ -272,13 +274,9 @@ export function renderLobby(ctx) {
             <span class="text-amber-300 text-xs mt-0.5">ⓘ</span>
             <p class="text-xs leading-snug text-amber-100/80"><span class="font-bold text-amber-200">Heads up:</span> Percival sees Merlin (Morgana fools him). Mordred hides from Merlin. Oberon is isolated — evil don’t know him.</p>
           </div>
-          <!-- Advanced: player count + remove buttons -->
           <div class="mt-4 flex items-center justify-between">
             <span class="text-xs font-bold tracking-widest text-white/60">${players.length}/10 players</span>
-            <div class="flex gap-1.5">
-              <button data-remove-last class="px-3 py-1.5 rounded-full bg-white/10 hover:bg-evil/20 border border-white/10 text-xs font-bold text-white/70">− Remove</button>
-              <button id="btn-clear-lobby" class="px-3 py-1.5 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 text-xs font-bold text-white/50">Clear</button>
-            </div>
+            <span class="text-xs text-white/30">Tap avatar ✕ to kick</span>
           </div>
         </div>
       </div>

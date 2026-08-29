@@ -1756,17 +1756,19 @@ function renderLobby(ctx) {
   // Avatar bubbles — show up to 10, with YOU badge on first human, plus dashed waiting slots
   const maxShow = 10;
   const avatars = players.map((p, i) => {
-    const isYou = i === 0; // first player is host / you
+    const isYou = i === 0;
     const color = isYou ? 'border-emerald-400' : 'border-white/15';
     const bg = isYou ? 'bg-gradient-to-br from-amber-200 to-orange-100' : 'bg-gradient-to-br from-slate-600 to-slate-700';
     const botBadge = p.isBot ? '<span class="absolute -bottom-1 -right-1 px-1 py-0 rounded-full bg-white/90 text-[8px] font-extrabold text-obsidian border border-white">BOT</span>' : '';
     const youBadge = isYou ? '<span class="absolute -bottom-2 left-1/2 -translate-x-1/2 px-2 py-0.5 rounded-full bg-white text-obsidian text-[9px] font-extrabold tracking-widest">YOU</span>' : '';
-    const editHint = isYou ? 'data-edit-idx="'+i+'"' : '';
+    const canKick = players.length > 1;
+    const kickBtn = canKick ? `<button data-kick-idx="${i}" class="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-black/70 hover:bg-evil border border-white/20 flex items-center justify-center text-white text-[9px] leading-none opacity-90 hover:opacity-100 transition-opacity" title="Kick">✕</button>` : '';
     return `
       <div class="flex flex-col items-center gap-1.5 relative group">
-        <div ${editHint} class="relative w-[56px] h-[56px] sm:w-[60px] sm:h-[60px] rounded-full border-2 ${color} ${bg} flex items-center justify-center text-lg font-extrabold text-white overflow-hidden shadow-md cursor-pointer hover:scale-105 transition-transform">
+        <div data-edit-idx="${i}" class="relative w-[56px] h-[56px] sm:w-[60px] sm:h-[60px] rounded-full border-2 ${color} ${bg} flex items-center justify-center text-lg font-extrabold text-white overflow-hidden shadow-md cursor-pointer hover:scale-105 transition-transform">
           ${p.name ? escape(p.name[0].toUpperCase()) : '?'}
           ${botBadge}
+          ${kickBtn}
         </div>
         ${youBadge}
         <span class="text-xs font-bold text-white mt-1">${escape(p.name || 'Player')}</span>
@@ -1835,14 +1837,14 @@ function renderLobby(ctx) {
         ${waiting}
       </div>
 
-      <!-- Change name quick edit (below avatars, for host) -->
+      <!-- Add player (host) — name edit is via tapping avatar for nicer UI -->
       <div class="mt-3 flex gap-2">
-        <input id="input-my-name" value="${escape(myName)}" maxlength="16" placeholder="Your name"
+        <input id="input-add-player" maxlength="16" placeholder="Add player name (e.g. Alex)"
           class="flex-1 px-3.5 py-2.5 rounded-xl bg-white/10 border border-white/15 text-white placeholder:text-white/40 text-sm font-medium outline-none focus:border-[#3aa8d6] focus:bg-white/15" />
         <button id="btn-add-bot" class="px-3.5 py-2.5 rounded-xl bg-white/10 hover:bg-white/15 border border-white/10 text-white text-sm font-semibold">+ Bot</button>
-        <button id="btn-add-human" class="px-3.5 py-2.5 rounded-xl bg-white/10 hover:bg-white/15 border border-white/10 text-white text-sm font-semibold">+ Friend</button>
+        <button id="btn-add-player" class="px-4 py-2.5 rounded-xl bg-[#f3ecd8] hover:bg-white text-[#0e2533] text-sm font-bold">Add</button>
       </div>
-      <p class="text-xs text-white/40 mt-1.5 text-center">Tap avatar to edit • Add up to 10 • Works on each player’s own device</p>
+      <p class="text-xs text-white/40 mt-1.5 text-center">Tap avatar to edit or kick • Add up to 10 • Works on each player's own device</p>
 
       <!-- Trust card -->
       <div class="mt-4 rounded-2xl bg-black/25 border border-white/10 p-3 sm:p-3.5 flex items-center justify-between">
@@ -1869,13 +1871,9 @@ function renderLobby(ctx) {
             <span class="text-amber-300 text-xs mt-0.5">ⓘ</span>
             <p class="text-xs leading-snug text-amber-100/80"><span class="font-bold text-amber-200">Heads up:</span> Percival sees Merlin (Morgana fools him). Mordred hides from Merlin. Oberon is isolated — evil don’t know him.</p>
           </div>
-          <!-- Advanced: player count + remove buttons -->
           <div class="mt-4 flex items-center justify-between">
             <span class="text-xs font-bold tracking-widest text-white/60">${players.length}/10 players</span>
-            <div class="flex gap-1.5">
-              <button data-remove-last class="px-3 py-1.5 rounded-full bg-white/10 hover:bg-evil/20 border border-white/10 text-xs font-bold text-white/70">− Remove</button>
-              <button id="btn-clear-lobby" class="px-3 py-1.5 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 text-xs font-bold text-white/50">Clear</button>
-            </div>
+            <span class="text-xs text-white/30">Tap avatar ✕ to kick</span>
           </div>
         </div>
       </div>
@@ -2643,7 +2641,10 @@ function startLobbyPoll() {
             if (changed) saveLobbyDraft();
           }
           lobbyRoomCache = room;
-          queueRender();
+          // Avoid clobbering typing — don't re-render while user is typing in lobby inputs
+          const active = document.activeElement;
+          const isTyping = active && (active.id==='input-add-player' || active.id==='input-join-name' || active.id==='input-home-search' || active.tagName==='INPUT');
+          if (!isTyping) queueRender();
         } else {
           lobbyRoomCache = room;
         }
@@ -3723,12 +3724,20 @@ function bindDynamicEvents(pub){
         queueRender();
       } catch(e){ toast(e.message, 'error'); }
     });
-    document.getElementById('input-my-name')?.addEventListener('change', (e)=>{
-      lobbyDraft.players[0].name = e.target.value.trim() || 'Lucky';
-      saveLobbyDraft(); syncLobbyToServer(); render();
+    // Add player via input + bot, with nicer avatar edit modal
+    document.getElementById('input-add-player')?.addEventListener('keydown', (e)=>{
+      if (e.key==='Enter') { e.preventDefault(); document.getElementById('btn-add-player')?.click(); }
     });
-    document.getElementById('input-my-name')?.addEventListener('input', (e)=>{
-      lobbyDraft.players[0].name = e.target.value;
+    document.getElementById('btn-add-player')?.addEventListener('click', ()=>{
+      const inp=document.getElementById('input-add-player');
+      let name=(inp?.value||'').trim();
+      if (!name) name=`Player ${lobbyDraft.players.length+1}`;
+      if (name.length>16) return toast('Name max 16 chars','error');
+      if (lobbyDraft.players.some(p=>p.name.toLowerCase()===name.toLowerCase())) return toast('Name already taken','error');
+      if (lobbyDraft.players.length>=10) return toast('Max 10 players','error');
+      lobbyDraft.players.push({ name, isBot: false });
+      if (inp) inp.value='';
+      saveLobbyDraft(); syncLobbyToServer(); queueRender();
     });
     document.getElementById('btn-add-bot')?.addEventListener('click', ()=>{
       if (lobbyDraft.players.length>=10) return toast('Max 10 players', 'error');
@@ -3737,26 +3746,59 @@ function bindDynamicEvents(pub){
       lobbyDraft.players.push({ name: n, isBot: true });
       saveLobbyDraft(); syncLobbyToServer(); queueRender();
     });
-    document.getElementById('btn-add-human')?.addEventListener('click', ()=>{
-      if (lobbyDraft.players.length>=10) return toast('Max 10', 'error');
-      const n=`Player ${lobbyDraft.players.length+1}`;
-      lobbyDraft.players.push({ name: n, isBot: false });
-      saveLobbyDraft(); syncLobbyToServer(); queueRender();
-    });
+    // Avatar edit — nice modal instead of plain prompt
     document.querySelectorAll('[data-edit-idx]')?.forEach(el=>{
-      el.addEventListener('click', ()=>{
+      el.addEventListener('click', (e)=>{
+        if (e.target.closest('[data-kick-idx]')) return;
         const idx=Number(el.dataset.editIdx);
-        const cur=lobbyDraft.players[idx]?.name||'';
-        const next=prompt('Edit name', cur);
-        if (next!==null) { lobbyDraft.players[idx].name = next.trim().slice(0,16) || cur; saveLobbyDraft(); syncLobbyToServer(); render(); }
+        const p=lobbyDraft.players[idx];
+        if (!p) return;
+        const cur=p.name||'';
+        const overlay=document.createElement('div');
+        overlay.className='fixed inset-0 z-40 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4';
+        overlay.innerHTML=`
+          <div class="w-full max-w-[360px] rounded-[20px] bg-[#1e1a2e] border border-white/10 p-5 text-center shadow-2xl">
+            <div class="w-16 h-16 mx-auto rounded-full bg-gradient-to-br from-amber-200 to-orange-100 border-2 border-emerald-400 flex items-center justify-center text-xl font-black text-black">${escape(cur.slice(0,2).toUpperCase()||'?')}</div>
+            <h3 class="font-bold text-white mt-3">Edit player</h3>
+            <p class="text-xs text-white/50">${p.isBot?'BOT':'Human'} ${idx===0?'• YOU':''}</p>
+            <input id="avatar-edit-input" maxlength="16" value="${escape(cur)}" placeholder="Player name" class="mt-4 w-full px-3.5 py-3 rounded-xl bg-white/10 border border-white/20 text-white placeholder:text-white/30 text-sm font-medium outline-none focus:border-[#7ec8e6] text-center" />
+            <div class="mt-4 grid grid-cols-2 gap-2">
+              <button id="avatar-edit-cancel" class="py-3 rounded-xl bg-white/10 hover:bg-white/15 border border-white/10 text-white font-semibold">Cancel</button>
+              <button id="avatar-edit-save" class="py-3 rounded-xl bg-[#7ec8e6] hover:bg-[#a0d8f0] text-[#0a1e2e] font-black">Save</button>
+            </div>
+            ${lobbyDraft.players.length>1 ? `<button id="avatar-edit-kick" class="mt-3 w-full py-2.5 rounded-xl bg-evil/15 hover:bg-evil/25 border border-evil/20 text-evil text-sm font-bold">Kick player</button>` : ''}
+          </div>
+        `;
+        document.body.appendChild(overlay);
+        const inp2=overlay.querySelector('#avatar-edit-input');
+        setTimeout(()=> inp2?.select(), 30);
+        const close=()=> overlay.remove();
+        overlay.addEventListener('click', (e)=>{ if(e.target===overlay) close(); });
+        overlay.querySelector('#avatar-edit-cancel')?.addEventListener('click', close);
+        overlay.querySelector('#avatar-edit-save')?.addEventListener('click', ()=>{
+          const next=(inp2.value||'').trim().slice(0,16);
+          if (!next) return toast('Name cannot be empty','error');
+          if (lobbyDraft.players.some((x,i)=> i!==idx && x.name.toLowerCase()===next.toLowerCase())) return toast('Name already taken','error');
+          lobbyDraft.players[idx].name=next;
+          saveLobbyDraft(); syncLobbyToServer(); close(); queueRender();
+        });
+        overlay.querySelector('#avatar-edit-kick')?.addEventListener('click', ()=>{
+          const name=lobbyDraft.players[idx]?.name||'Player';
+          close();
+          showConfirm({ title:'Kick player?', body:`Remove <span class="text-white font-bold">${escape(name)}</span> from lobby?`, confirmText:'Kick', variant:'danger', onConfirm:()=>{ lobbyDraft.players.splice(idx,1); saveLobbyDraft(); syncLobbyToServer(); queueRender(); }});
+        });
+        inp2?.addEventListener('keydown', (e)=>{ if(e.key==='Enter') overlay.querySelector('#avatar-edit-save')?.click(); if(e.key==='Escape') close(); });
       });
     });
-    document.querySelector('[data-remove-last]')?.addEventListener('click', ()=>{
-      if (lobbyDraft.players.length>1) { lobbyDraft.players.pop(); saveLobbyDraft(); syncLobbyToServer(); render(); }
-    });
-    document.getElementById('btn-clear-lobby')?.addEventListener('click', ()=>{
-      const code = lobbyDraft.roomCode;
-      lobbyDraft = defaultLobby(); lobbyDraft.roomCode = code; persistLobbyCode(code); saveLobbyDraft(); syncLobbyToServer(); render();
+    // Kick via X on avatar
+    document.querySelectorAll('[data-kick-idx]')?.forEach(btn=>{
+      btn.addEventListener('click', (e)=>{
+        e.stopPropagation();
+        const idx=Number(btn.dataset.kickIdx);
+        if (lobbyDraft.players.length<=1) return toast('Need at least 1 player','error');
+        const name=lobbyDraft.players[idx]?.name||'Player';
+        showConfirm({ title:'Kick player?', body:`Remove <span class="text-white font-bold">${escape(name)}</span>?`, confirmText:'Kick', variant:'danger', onConfirm:()=>{ lobbyDraft.players.splice(idx,1); saveLobbyDraft(); syncLobbyToServer(); queueRender(); }});
+      });
     });
     document.querySelectorAll('[data-extra]')?.forEach(btn=>{
       btn.addEventListener('click', ()=>{
@@ -3769,9 +3811,13 @@ function bindDynamicEvents(pub){
       const p=document.getElementById('panel-extra-roles');
       if(p) p.classList.toggle('hidden');
     });
-    document.getElementById('btn-lobby-back')?.addEventListener('click', ()=>{ uiMode='HOME'; showGamePopup=false; queueRender(); });
+    document.getElementById('btn-lobby-back')?.addEventListener('click', ()=>{
+      showConfirm({ title:'Back to menu?', body:'Leave this lobby and go back to Pick a game? Your lobby is kept.', confirmText:'Back to menu', onConfirm:()=>{ uiMode='HOME'; showGamePopup=false; queueRender(); }});
+    });
     document.getElementById('btn-lobby-help')?.addEventListener('click', ()=>{ document.getElementById('rules-dialog')?.showModal(); });
-    document.getElementById('btn-change-game')?.addEventListener('click', ()=>{ uiMode='HOME'; showGamePopup=false; queueRender(); });
+    document.getElementById('btn-change-game')?.addEventListener('click', ()=>{
+      showConfirm({ title:'Change game?', body:'Go back to Pick a game? Your lobby is kept.', confirmText:'Pick a game', onConfirm:()=>{ uiMode='HOME'; showGamePopup=false; queueRender(); }});
+    });
 
     document.getElementById('btn-start')?.addEventListener('click', async ()=>{
       try {
