@@ -131,105 +131,42 @@ function startLobbyPoll() {
         return;
       }
       if (room && room.players) {
-        ensureLobbyIds(lobbyDraft.players);
-        const fetchedStr = JSON.stringify(room.players.map(p=>({id:p.id,name:p.name,isBot:!!p.isBot})).sort((a,b)=>(a.id||a.name).localeCompare(b.id||b.name)));
-        const localStr = JSON.stringify(lobbyDraft.players.map(p=>({id:p.id,name:p.name,isBot:!!p.isBot})).sort((a,b)=>(a.id||a.name).localeCompare(b.id||b.name)));
-        let playersChanged = fetchedStr !== localStr;
-        if (playersChanged) {
-          if (!isJoinerMode) {
-            const localById = new Map(lobbyDraft.players.map(p=>[p.id,p]));
-            const serverById = new Map(room.players.map(p=>[p.id,p]));
-            let changed = false;
-            // Add new joiners from server not in local (by id, fallback to name)
-            for (const p of room.players) {
-              if (p.id && localById.has(p.id)) {
-                // Same id exists — check if joiner renamed themselves, update local
-                const localP = localById.get(p.id);
-                if (localP.name !== p.name && !localP.isBot && p.id !== lobbyDraft.players[0]?.id) {
-                  localP.name = p.name;
-                  changed = true;
-                }
-                continue;
-              }
-              if (!p.id) {
-                // Legacy without id — check by name
-                if (!lobbyDraft.players.some(x=>x.name===p.name)) {
-                  lobbyDraft.players.push({ id: p.id || lobbyPlayerId(), name: p.name, isBot: !!p.isBot });
-                  changed = true;
-                }
-                continue;
-              }
-              // New id not in local — it's a new joiner
-              if (!p.isBot) {
-                lobbyDraft.players.push({ id: p.id, name: p.name, isBot: !!p.isBot });
-                changed = true;
-              }
-            }
-            // Remove kicked players: local has id not in server (and is not host)
-            const serverIds = new Set(room.players.map(p=>p.id).filter(Boolean));
-            const toRemove=[];
-            lobbyDraft.players.forEach((p,i)=>{
-              if (i===0) return;
-              if (p.id && !serverIds.has(p.id)) {
-                // Check if it's a bot that host still has but server missing due to stale push? Keep bots? Only remove non-bots that were kicked
-                // If server missing a bot that host has, keep it (host authoritative for bots)
-                if (!p.isBot) toRemove.push(i);
-              } else if (!p.id) {
-                const serverNames = new Set(room.players.map(x=>x.name));
-                if (!serverNames.has(p.name) && !p.isBot) toRemove.push(i);
-              }
-            });
-            for (let i=toRemove.length-1; i>=0; i--) {
-              lobbyDraft.players.splice(toRemove[i],1);
-              changed=true;
-            }
-            if (changed) saveLobbyDraft();
-          } else {
-            // Joiner: check if kicked
-            if (hasJoined) {
-              let myName=null; try{ myName=localStorage.getItem('avalon:myName:'+lobbyDraft.roomCode); }catch(_){}
-              let myId=null; try{ myId=localStorage.getItem('avalon:myId:'+lobbyDraft.roomCode); }catch(_){}
-              const stillIn = myId ? room.players.some(p=>p.id===myId) : (myName ? room.players.some(p=>p.name===myName) : false);
-              if (!stillIn) {
-                toast('You were kicked from lobby','error');
-                // Show popup and return to main
-                hasJoined=false;
-                isJoinerMode=false;
-                try{ localStorage.removeItem('avalon:myName:'+lobbyDraft.roomCode); }catch(_){}
-                try{ localStorage.removeItem('avalon:myId:'+lobbyDraft.roomCode); }catch(_){}
-                history.replaceState(null,'',window.location.pathname);
-                uiMode='HOME';
-                showGamePopup=false;
-                lobbyDraft=defaultLobby();
-                if (roomUnsub) try{ roomUnsub(); }catch(_){}
-                roomUnsub=null;
-                stopLobbyPoll();
-                queueRender();
-                // Also show confirm popup
-                setTimeout(()=> showConfirm({ title:'Kicked', body:'You were kicked from the lobby by the host.', confirmText:'OK', onConfirm:()=>{} }), 300);
-                return;
-              }
-            }
+        // KV is single source of truth — check if joiner was kicked
+        if (isJoinerMode && hasJoined) {
+          let myId=null; try{ myId=localStorage.getItem('avalon:myId:'+lobbyDraft.roomCode); }catch(_){}
+          let myName=null; try{ myName=localStorage.getItem('avalon:myName:'+lobbyDraft.roomCode); }catch(_){}
+          const stillIn = myId ? room.players.some(p=>p.id===myId) : myName ? room.players.some(p=>p.name===myName) : false;
+          if (!stillIn) {
+            toast('You were kicked from lobby','error');
+            hasJoined=false;
+            isJoinerMode=false;
+            try{ localStorage.removeItem('avalon:myName:'+lobbyDraft.roomCode); }catch(_){}
+            try{ localStorage.removeItem('avalon:myId:'+lobbyDraft.roomCode); }catch(_){}
+            history.replaceState(null,'',window.location.pathname);
+            uiMode='HOME';
+            showGamePopup=false;
+            lobbyDraft=defaultLobby();
+            if (roomUnsub) try{ roomUnsub(); }catch(_){}
+            roomUnsub=null;
+            stopLobbyPoll();
+            queueRender();
+            setTimeout(()=> showConfirm({ title:'Kicked', body:'You were kicked from the lobby by the host.', confirmText:'OK', onConfirm:()=>{} }), 300);
+            return;
           }
         }
-        // Sync extraRoles for joiners (host is source of truth)
-        let extraChanged = false;
-        if (room.extraRoles && typeof room.extraRoles === 'object') {
-          const roomExtraStr = JSON.stringify(room.extraRoles);
-          const localExtraStr = JSON.stringify(lobbyDraft.extraRoles);
-          if (roomExtraStr !== localExtraStr) {
-            if (isJoinerMode) {
-              lobbyDraft.extraRoles = { percival: !!room.extraRoles.percival, morgana: !!room.extraRoles.morgana, mordred: !!room.extraRoles.mordred, oberon: !!room.extraRoles.oberon };
-              saveLobbyDraft();
-              extraChanged = true;
-            }
-          }
-        }
+        // Single source of truth: KV room is authoritative
         lobbyRoomCache = room;
-        // Avoid clobbering typing — don't re-render while user is typing in lobby inputs
+        // Keep lobbyDraft in sync for host fallback / offline
+        if (!isJoinerMode) {
+          lobbyDraft.players = room.players.map(p=>({id:p.id, name:p.name, isBot:!!p.isBot}));
+          lobbyDraft.extraRoles = room.extraRoles || lobbyDraft.extraRoles;
+          saveLobbyDraft();
+        } else {
+          if (room.extraRoles) lobbyDraft.extraRoles = room.extraRoles;
+        }
         const active = document.activeElement;
         const isTyping = active && (active.id==='input-add-player' || active.id==='input-join-name' || active.id==='input-home-search' || active.tagName==='INPUT');
-        if ((playersChanged || extraChanged) && !isTyping) queueRender();
+        if (!isTyping) queueRender();
         // Also if room has state (game started), host should transition
         if (room.state && room.state.phase !== PHASES.LOBBY && state.phase === PHASES.LOBBY) {
           // Game started by host — joiner should load it
@@ -495,22 +432,24 @@ function buildLayout(pub){
       if (showGamePopup) html += renderGamePopup(hostNameForPopup);
       return html;
     }
-    const inviteLink = pub.roomCode ? net.generateInviteLink(pub.roomCode) : (lobbyDraft.inviteLink || (window.location.origin + window.location.pathname + '?room=' + lobbyDraft.roomCode));
-    // Joiner mode: show join screen with host's players from cache
-    if (isJoinerMode && lobbyRoomCache && lobbyRoomCache.players) {
-      const hostPlayers = lobbyRoomCache.players;
+    // Single source of truth: lobbyRoomCache (KV mirror). Fallback to lobbyDraft for offline/host initial.
+    const room = lobbyRoomCache || { code: lobbyDraft.roomCode, players: lobbyDraft.players, extraRoles: lobbyDraft.extraRoles };
+    const inviteLink = net.generateInviteLink(room.code || lobbyDraft.roomCode);
+    // Joiner mode: show join screen or waiting lobby from KV
+    if (isJoinerMode) {
+      const hostPlayers = room.players || [];
       const count = hostPlayers.length;
       const joinedName = (()=>{ try{ return localStorage.getItem('avalon:myName:'+lobbyDraft.roomCode) || ''; }catch(_){return ''}})();
-      const isAlreadyJoined = hasJoined || (joinedName && hostPlayers.some(p=> p.name===joinedName));
+      const joinedId = (()=>{ try{ return localStorage.getItem('avalon:myId:'+lobbyDraft.roomCode) || ''; }catch(_){return ''}})();
+      const isAlreadyJoined = hasJoined || (joinedId && hostPlayers.some(p=> p.id===joinedId)) || (joinedName && hostPlayers.some(p=> p.name===joinedName));
       if (isAlreadyJoined) {
-        // Joiner sees same lobby as host but limited (can only edit own name)
-        const effectiveExtra = (lobbyRoomCache && lobbyRoomCache.extraRoles) ? lobbyRoomCache.extraRoles : lobbyDraft.extraRoles;
         const ctx = {
-          roomCode: lobbyDraft.roomCode,
-          playersDraft: hostPlayers.map(p=> ({name:p.name, isBot:p.isBot})),
-          extraRoles: effectiveExtra,
+          roomCode: room.code || lobbyDraft.roomCode,
+          playersDraft: hostPlayers.map(p=> ({id:p.id, name:p.name, isBot:!!p.isBot})),
+          extraRoles: room.extraRoles || lobbyDraft.extraRoles,
           myName: joinedName,
-          inviteLink: net.generateInviteLink(lobbyDraft.roomCode),
+          myId: joinedId,
+          inviteLink,
           isJoiner: true,
           joinedName: joinedName,
         };
@@ -522,13 +461,13 @@ function buildLayout(pub){
             <button id="btn-join-back" class="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center text-white/70">‹</button>
             <div class="text-center">
               <h1 class="font-display font-extrabold text-[18px] text-[#f0e8d0]">Quest of Shadows</h1>
-              <p class="text-xs text-white/60">Joining ${escape(lobbyDraft.roomCode)}</p>
+              <p class="text-xs text-white/60">Joining ${escape(room.code || lobbyDraft.roomCode)}</p>
             </div>
             <div class="w-8"></div>
           </div>
           <div class="mt-5 rounded-[24px] bg-[#29546c] border border-white/10 p-6 text-center">
             <p class="text-xs tracking-widest font-bold text-white/60">ROOM</p>
-            <div class="font-display font-black text-[36px] tracking-[0.18em] text-[#f3ecd8]">${escape(lobbyDraft.roomCode)}</div>
+            <div class="font-display font-black text-[36px] tracking-[0.18em] text-[#f3ecd8]">${escape(room.code || lobbyDraft.roomCode)}</div>
             <p class="text-xs text-white/60 mt-1">${count} in lobby — waiting for host</p>
             <div class="mt-3 flex flex-wrap justify-center gap-1.5">
               ${hostPlayers.map(p=> `<span class="px-2.5 py-1 rounded-full bg-white/15 text-xs font-bold text-white">${escape(p.name)}${p.isBot?' · BOT':''}</span>`).join('')}
@@ -539,17 +478,18 @@ function buildLayout(pub){
             <p class="text-xs text-white/50 mt-1">Enter your name — you’ll be added to the host’s lobby. No passing.</p>
             <input id="input-join-name" maxlength="16" placeholder="Your name" value=""
               class="mt-3 w-full px-3.5 py-3 rounded-xl bg-white/10 border border-white/15 text-white placeholder:text-white/40 text-sm font-medium outline-none focus:border-[#3aa8d6]" />
-            <button id="btn-join-room" class="mt-3 w-full py-3.5 rounded-full bg-[#f3ecd8] hover:bg-white text-[#0e2533] font-extrabold tracking-wide">Join ${escape(lobbyDraft.roomCode)}</button>
+            <button id="btn-join-room" class="mt-3 w-full py-3.5 rounded-full bg-[#f3ecd8] hover:bg-white text-[#0e2533] font-extrabold tracking-wide">Join ${escape(room.code || lobbyDraft.roomCode)}</button>
             <p class="text-xs text-white/40 mt-2 text-center">Host will see you appear and can start when 5+ are ready.</p>
           </div>
         </div>
       `;
     }
     const ctx = {
-      roomCode: pub.roomCode || lobbyDraft.roomCode,
-      playersDraft: state.players.length ? state.players.map(p=>({name:p.name, isBot:p.isBot})) : lobbyDraft.players,
-      extraRoles: lobbyDraft.extraRoles,
-      myName: lobbyDraft.players[0]?.name || 'Lucky',
+      roomCode: room.code || lobbyDraft.roomCode,
+      playersDraft: (room.players || lobbyDraft.players).map(p=>({id:p.id, name:p.name, isBot:!!p.isBot})),
+      extraRoles: room.extraRoles || lobbyDraft.extraRoles,
+      myName: (room.players && room.players[0]?.name) || lobbyDraft.players[0]?.name || 'Lucky',
+      myId: room.players && room.players[0]?.id,
       inviteLink,
     };
     return renderLobby(ctx);
@@ -1234,6 +1174,7 @@ function bindDynamicEvents(pub){
       lobbyDraft = { roomCode: newCode, players: [{ id: lobbyPlayerId(), name: hostName, isBot: false }], extraRoles: { percival: true, morgana: true, mordred: false, oberon: false } };
       saveLobbyDraft();
       try { await syncLobbyToServer(); } catch(_){}
+      lobbyRoomCache = { code: newCode, players: lobbyDraft.players.map(p=>({id:p.id, name:p.name, isBot:!!p.isBot})), extraRoles: {...lobbyDraft.extraRoles} };
       history.replaceState(null,'', window.location.pathname + '?room=' + newCode);
       uiMode='LOBBY'; showGamePopup=false; queueRender();
       startLobbyPoll();
@@ -1335,35 +1276,47 @@ function bindDynamicEvents(pub){
         queueRender();
       } catch(e){ toast(e.message, 'error'); }
     });
-    // Add Bot — single button, uses Bot name if typed else random
-    document.getElementById('input-add-player')?.addEventListener('keydown', (e)=>{
-      if (e.key==='Enter') { e.preventDefault(); document.getElementById('btn-add-bot')?.click(); }
-    });
-    document.getElementById('btn-add-bot')?.addEventListener('click', ()=>{
-      if (lobbyDraft.players.length>=10) return toast('Max 10 players', 'error');
+// Add Bot — host only, push directly to KV (single source of truth)
+    document.getElementById('btn-add-bot')?.addEventListener('click', async ()=>{
+      const room = lobbyRoomCache || await net.getRoomAsync(lobbyDraft.roomCode).catch(()=>null) || { code: lobbyDraft.roomCode, players: lobbyDraft.players.map(p=>({id:p.id, name:p.name, isBot:!!p.isBot})), extraRoles: {...lobbyDraft.extraRoles} };
+      if ((room.players||[]).length>=10) return toast('Max 10 players','error');
       const inp=document.getElementById('input-add-player');
       let name=(inp?.value||'').trim();
       if (name) {
         if (name.length>16) return toast('Name max 16 chars','error');
-        if (lobbyDraft.players.some(p=>p.name.toLowerCase()===name.toLowerCase())) return toast('Name already taken','error');
+        if (room.players.some(p=>p.name.toLowerCase()===name.toLowerCase())) return toast('Name already taken','error');
       } else {
         const botNames=['Galahad','Percival','Tristan','Lancelot','Gawain','Kay','Bors','Ector'];
         name=botNames[Math.floor(Math.random()*botNames.length)] + Math.floor(Math.random()*900);
+        let tries=0;
+        while (room.players.some(p=>p.name===name) && tries<10) {
+          name=botNames[Math.floor(Math.random()*botNames.length)] + Math.floor(Math.random()*900);
+          tries++;
+        }
       }
-      lobbyDraft.players.push({ id: lobbyPlayerId(), name, isBot: true });
+      const newPlayer = { id: lobbyPlayerId(), name, isBot: true };
+      room.players.push(newPlayer);
       if (inp) inp.value='';
-      saveLobbyDraft(); syncLobbyToServer(); queueRender();
+      try {
+        await net.pushRoom(lobbyDraft.roomCode, room);
+        lobbyRoomCache = room;
+        lobbyDraft.players = room.players.map(p=>({id:p.id, name:p.name, isBot:!!p.isBot}));
+        saveLobbyDraft();
+      } catch(e){ toast('Failed to add bot','error'); }
+      queueRender();
     });
-    // Avatar edit — nice modal, permissions: host can edit self+bots, players only self
+    // Avatar edit — straightforward: host edits via KV, joiner edits own via KV
     document.querySelectorAll('[data-edit-idx]')?.forEach(el=>{
       el.addEventListener('click', (e)=>{
         if (e.target.closest('[data-kick-idx]')) return;
         const idx=Number(el.dataset.editIdx);
-        const sourcePlayers = (isJoinerMode && lobbyRoomCache && lobbyRoomCache.players) ? lobbyRoomCache.players : lobbyDraft.players;
+        const room = lobbyRoomCache || { code: lobbyDraft.roomCode, players: lobbyDraft.players, extraRoles: lobbyDraft.extraRoles };
+        const sourcePlayers = room.players || lobbyDraft.players;
         const p=sourcePlayers[idx];
         if (!p) return;
         let myName2=null; try{ myName2=localStorage.getItem('avalon:myName:'+lobbyDraft.roomCode); }catch(_){}
-        const isYou = isJoinerMode ? (p.name===myName2) : (idx===0);
+        let myId2=null; try{ myId2=localStorage.getItem('avalon:myId:'+lobbyDraft.roomCode); }catch(_){}
+        const isYou = isJoinerMode ? (p.id ? p.id===myId2 : p.name===myName2) : (p.id ? p.id===(room.players[0]?.id || lobbyDraft.players[0]?.id) : idx===0);
         if (!isJoinerMode) {
           if (!p.isBot && !isYou) return toast('You can only edit yourself or bots','default');
         } else {
@@ -1394,45 +1347,62 @@ function bindDynamicEvents(pub){
         overlay.querySelector('#avatar-edit-save')?.addEventListener('click', async ()=>{
           const next=(inp2.value||'').trim().slice(0,16);
           if (!next) return toast('Name cannot be empty','error');
-          const checkPlayers = (isJoinerMode && lobbyRoomCache && lobbyRoomCache.players) ? lobbyRoomCache.players : lobbyDraft.players;
+          const room2 = lobbyRoomCache || await net.getRoomAsync(lobbyDraft.roomCode).catch(()=>null) || { code: lobbyDraft.roomCode, players: lobbyDraft.players, extraRoles: lobbyDraft.extraRoles };
+          const checkPlayers = room2.players || [];
           if (checkPlayers.some((x,i)=> i!==idx && x.name.toLowerCase()===next.toLowerCase())) return toast('Name already taken','error');
           if (!isJoinerMode) {
-            lobbyDraft.players[idx].name=next;
-            saveLobbyDraft(); syncLobbyToServer(); close(); queueRender();
+            try {
+              const target = room2.players[idx];
+              if (!target) throw new Error('Player not found');
+              target.name = next;
+              await net.pushRoom(lobbyDraft.roomCode, room2);
+              lobbyRoomCache = room2;
+              lobbyDraft.players = room2.players.map(p=>({id:p.id, name:p.name, isBot:!!p.isBot}));
+              saveLobbyDraft();
+              close(); queueRender(); toast('Name updated','success');
+            } catch(err){ toast(err.message,'error'); }
           } else {
             try {
-              const room = await net.getRoomAsync(lobbyDraft.roomCode);
-              if (!room || !Array.isArray(room.players)) throw new Error('Room not found');
-              const serverIdx = room.players.findIndex(x=> x.name===myName2);
+              const room3 = await net.getRoomAsync(lobbyDraft.roomCode);
+              if (!room3 || !Array.isArray(room3.players)) throw new Error('Room not found');
+              const myId = myId2;
+              const serverIdx = myId ? room3.players.findIndex(x=> x.id===myId) : room3.players.findIndex(x=> x.name===myName2);
               if (serverIdx===-1) throw new Error('Your player not found');
-              if (room.players.some((x,i)=> i!==serverIdx && x.name.toLowerCase()===next.toLowerCase())) return toast('Name already taken','error');
-              room.players[serverIdx].name = next;
+              if (room3.players.some((x,i)=> i!==serverIdx && x.name.toLowerCase()===next.toLowerCase())) return toast('Name already taken','error');
+              room3.players[serverIdx].name = next;
               try{ localStorage.setItem('avalon:myName:'+lobbyDraft.roomCode, next); }catch(_){}
-              await net.pushRoom(lobbyDraft.roomCode, room);
-              lobbyRoomCache = await net.getRoomAsync(lobbyDraft.roomCode);
-              close(); queueRender();
-              toast('Name updated','success');
+              await net.pushRoom(lobbyDraft.roomCode, room3);
+              lobbyRoomCache = await net.getRoomAsync(lobbyDraft.roomCode).catch(()=>room3);
+              close(); queueRender(); toast('Name updated','success');
             } catch(err){ toast(err.message||'Failed to update name','error'); }
           }
         });
         inp2?.addEventListener('keydown', (e)=>{ if(e.key==='Enter') overlay.querySelector('#avatar-edit-save')?.click(); if(e.key==='Escape') close(); });
       });
     });
-    // Kick via X on avatar — only host can kick, not self
+    // Kick via X on avatar — only host can kick, not self — direct KV write
     document.querySelectorAll('[data-kick-idx]')?.forEach(btn=>{
       btn.addEventListener('click', (e)=>{
         e.stopPropagation();
         if (isJoinerMode) return toast('Only host can kick','default');
         const idx=Number(btn.dataset.kickIdx);
+        const room = lobbyRoomCache || { code: lobbyDraft.roomCode, players: lobbyDraft.players, extraRoles: lobbyDraft.extraRoles };
+        const name=(room.players[idx]|| lobbyDraft.players[idx])?.name||'Player';
         if (idx===0) return toast('Cannot kick yourself','default');
-        if (lobbyDraft.players.length<=1) return toast('Need at least 1 player','error');
-        const name=lobbyDraft.players[idx]?.name||'Player';
+        if ((room.players||[]).length<=1) return toast('Need at least 1 player','error');
         showConfirm({ title:'Kick player?', body:`Remove <span class="text-white font-bold">${escape(name)}</span>?`, confirmText:'Kick', variant:'danger', onConfirm: async ()=>{
-          lobbyDraft.players.splice(idx,1);
-          saveLobbyDraft();
           try {
-            const roomPlayers = lobbyDraft.players.map(p=>({id:p.id, name:p.name, isBot:!!p.isBot}));
-            await net.pushRoom(lobbyDraft.roomCode, { players: roomPlayers, extraRoles: lobbyDraft.extraRoles });
+            const latest = await net.getRoomAsync(lobbyDraft.roomCode).catch(()=>room);
+            const target = (latest.players||[])[idx] || room.players[idx];
+            const targetId = target?.id;
+            let newPlayers;
+            if (targetId) newPlayers = latest.players.filter(p=>p.id!==targetId);
+            else { newPlayers = latest.players.slice(); newPlayers.splice(idx,1); }
+            latest.players = newPlayers;
+            await net.pushRoom(lobbyDraft.roomCode, latest);
+            lobbyRoomCache = latest;
+            lobbyDraft.players = latest.players.map(p=>({id:p.id, name:p.name, isBot:!!p.isBot}));
+            saveLobbyDraft();
           } catch(e){ console.warn(e); }
           queueRender();
         }});
@@ -1441,69 +1411,23 @@ function bindDynamicEvents(pub){
     document.querySelectorAll('[data-extra]')?.forEach(btn=>{
       btn.addEventListener('click', async ()=>{
         const key=btn.dataset.extra;
-        lobbyDraft.extraRoles[key]=!lobbyDraft.extraRoles[key];
-        saveLobbyDraft();
-        try { await syncExtraRolesToServer(); } catch(_){}
+        const room = lobbyRoomCache || await net.getRoomAsync(lobbyDraft.roomCode).catch(()=>null) || { code: lobbyDraft.roomCode, players: lobbyDraft.players, extraRoles: {...lobbyDraft.extraRoles} };
+        room.extraRoles = room.extraRoles || {...lobbyDraft.extraRoles};
+        room.extraRoles[key]=!room.extraRoles[key];
+        try {
+          await net.pushRoom(lobbyDraft.roomCode, { extraRoles: room.extraRoles });
+          lobbyRoomCache = await net.getRoomAsync(lobbyDraft.roomCode).catch(()=>room);
+          lobbyDraft.extraRoles = lobbyRoomCache.extraRoles || room.extraRoles;
+          saveLobbyDraft();
+        } catch(e){ console.warn(e); }
         render();
       });
-    });
-    document.getElementById('btn-toggle-options')?.addEventListener('click', ()=>{
-      const p=document.getElementById('panel-extra-roles');
-      if(p) p.classList.toggle('hidden');
-    });
-    document.getElementById('btn-lobby-back')?.addEventListener('click', ()=>{
-      showConfirm({ title:'Back to menu?', body:'Leave this lobby and go back to Pick a game? This will close the room for everyone.', confirmText:'Back to menu', variant:'danger', onConfirm: async ()=>{
-        const code=lobbyDraft.roomCode;
-        if (!isJoinerMode) {
-          try { await net.deleteRoom(code); } catch(_){}
-          try { localStorage.removeItem('avalon:lobby:'+code); }catch(_){}
-          try { localStorage.removeItem('avalon:lastRoomCode'); }catch(_){}
-          stopLobbyPoll();
-          if (roomUnsub) try{ roomUnsub(); }catch(_){}
-          roomUnsub=null;
-        } else {
-          if (hasJoined && myId) try{ net.leaveRoom(code, myId); }catch(_){}
-          hasJoined=false;
-          isJoinerMode=false;
-          try{ localStorage.removeItem('avalon:myName:'+code); }catch(_){}
-          try{ localStorage.removeItem('avalon:myId:'+code); }catch(_){}
-          history.replaceState(null,'',window.location.pathname);
-          stopLobbyPoll();
-        }
-        uiMode='HOME'; showGamePopup=false; lobbyDraft=defaultLobby(); queueRender();
-      }});
-    });
-    document.getElementById('btn-lobby-help')?.addEventListener('click', ()=>{ document.getElementById('rules-dialog')?.showModal(); });
-    document.getElementById('btn-change-game')?.addEventListener('click', ()=>{
-      showConfirm({ title:'Change game?', body:'Go back to Pick a game? Your lobby is kept.', confirmText:'Pick a game', onConfirm:()=>{ uiMode='HOME'; showGamePopup=false; queueRender(); }});
-    });
-
-    document.getElementById('btn-start')?.addEventListener('click', async ()=>{
+    });    document.getElementById('btn-start')?.addEventListener('click', async ()=>{
       try {
-        // Fetch latest room to include any joiners — union by name to avoid losing bots or joiners
-        let latestPlayers = lobbyDraft.players.slice();
-        try {
-          const room = await net.getRoomAsync(lobbyDraft.roomCode);
-          if (room && room.players && room.players.length) {
-            const serverPlayers = room.players.map(p=> ({ name: p.name, isBot: !!p.isBot }));
-            const seen = new Set(latestPlayers.map(p=>p.name));
-            for (const p of serverPlayers) {
-              if (!seen.has(p.name)) { latestPlayers.push({ name: p.name, isBot: !!p.isBot }); seen.add(p.name); }
-            }
-            // If we added any server players not in local, persist
-            if (latestPlayers.length !== lobbyDraft.players.length) {
-              lobbyDraft.players = latestPlayers.slice();
-              saveLobbyDraft();
-            }
-            // If local had players server missed (e.g., bots added just before start), push union back
-            const serverNames = new Set(serverPlayers.map(p=>p.name));
-            const hasLocalOnly = latestPlayers.some(p=> !serverNames.has(p.name));
-            if (hasLocalOnly) {
-              await net.pushRoom(lobbyDraft.roomCode, { players: latestPlayers.map((p,i)=>({id:`lobby_${i}_${p.name}`, name:p.name, isBot:!!p.isBot})) });
-            }
-          }
-        } catch(_){ latestPlayers = lobbyDraft.players.slice(); }
-        const players=latestPlayers.map((p,i)=>({ id:`p${i}_${Date.now().toString(36).slice(-3)}_${Math.random().toString(36).slice(2,5)}`, name: String(p.name).trim() || `Player ${i+1}`, isBot: !!p.isBot }));
+        // Single source of truth: KV room
+        const room = lobbyRoomCache || await net.getRoomAsync(lobbyDraft.roomCode).catch(()=>null) || { code: lobbyDraft.roomCode, players: lobbyDraft.players, extraRoles: lobbyDraft.extraRoles };
+        const latestPlayers = (room.players || []).map(p=>({ id: p.id, name: p.name, isBot: !!p.isBot }));
+        const players=latestPlayers.map((p,i)=>({ id: p.id || `p${i}_${Date.now().toString(36).slice(-3)}_${Math.random().toString(36).slice(2,5)}`, name: String(p.name).trim() || `Player ${i+1}`, isBot: !!p.isBot }));
         const names=players.map(p=>p.name);
         if (new Set(names).size!==names.length) throw new Error('Duplicate names — make each unique');
         if (names.some(n=>n.length>16)) throw new Error('Names max 16 chars');

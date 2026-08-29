@@ -152,8 +152,10 @@ export function renderLobby(ctx) {
   const players = ctx.playersDraft || [];
   const extra = ctx.extraRoles || {};
   const myName = ctx.myName || players[0]?.name || 'YOU';
+  const myId = ctx.myId || null;
   const isJoiner = !!ctx.isJoiner;
   const joinedName = ctx.joinedName || myName;
+  const joinedId = ctx.joinedId || ctx.myId || null;
   const need = Math.max(0, 5 - players.length);
   const canStart = !isJoiner && players.length >= 5 && players.length <= 10;
   const inviteLink = ctx.inviteLink || '';
@@ -161,13 +163,13 @@ export function renderLobby(ctx) {
   // Avatar bubbles — show up to 10, with YOU badge on first human, plus dashed waiting slots
   const maxShow = 10;
   const avatars = players.map((p, i) => {
-    const isYou = isJoiner ? p.name===joinedName : i===0;
+    const isYou = isJoiner ? (p.id ? p.id===joinedId : p.name===joinedName) : (p.id ? p.id===myId : i===0);
     const color = isYou ? 'border-emerald-400' : 'border-white/15';
     const bg = isYou ? 'bg-gradient-to-br from-amber-200 to-orange-100' : 'bg-gradient-to-br from-slate-600 to-slate-700';
     const botBadge = p.isBot ? '<span class="absolute -bottom-1 -right-1 px-1 py-0 rounded-full bg-white/90 text-[8px] font-extrabold text-black border border-white">BOT</span>' : '';
     const youBadge = isYou ? '<span class="absolute -bottom-2 left-1/2 -translate-x-1/2 px-2 py-0.5 rounded-full bg-[#f3ecd8] text-[#0a1e2e] text-[9px] font-extrabold tracking-widest">YOU</span>' : '';
     const canKick = !isJoiner && players.length > 1 && !isYou;
-    const canEdit = isJoiner ? p.name===joinedName : (p.isBot || i===0);
+    const canEdit = isJoiner ? (p.id ? p.id===joinedId : p.name===joinedName) : (p.isBot || isYou);
     const editAttr = canEdit ? `data-edit-idx="${i}"` : '';
     const kickBtn = canKick ? `<button data-kick-idx="${i}" class="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-black/70 hover:bg-evil border border-white/20 flex items-center justify-center text-white text-[9px] leading-none opacity-90 hover:opacity-100 transition-opacity" title="Kick">✕</button>` : '';
     return `
