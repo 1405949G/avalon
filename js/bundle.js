@@ -3866,9 +3866,13 @@ async function init(){
   let isJoiner = false;
   if (inviteCode) {
     if (inviteCode !== lobbyDraft.roomCode) {
-      // Check if room actually exists on server (async)
+      // Check if room actually exists on server — retry 4×400ms (host push race + KV eventual consistency)
       let existing = null;
-      try { existing = await net.getRoomAsync(inviteCode); } catch(_){}
+      for (let attempt=0; attempt<4; attempt++) {
+        try { existing = await net.getRoomAsync(inviteCode); } catch(_){}
+        if (existing && (existing.state || (existing.players && existing.players.length))) break;
+        await new Promise(r=> setTimeout(r, 400));
+      }
       if (existing && (existing.state || (existing.players && existing.players.length))) {
         // Room exists — joining
         lobbyDraft.roomCode = inviteCode;
@@ -3912,7 +3916,7 @@ async function init(){
     } catch(_){}
   }
   if (!isJoiner && lobbyDraft.roomCode) {
-    syncLobbyToServer();
+    try { await syncLobbyToServer(); } catch(_){}
     startLobbyPoll();
   } else if (isJoiner) {
     startLobbyPoll();
