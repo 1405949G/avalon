@@ -1,0 +1,215 @@
+/* Quest of Shadows — custom styles
+   Tailwind provides utilities; this file adds medieval theming,
+   animations, scrollbars, and component-level polish.
+   No placeholders — all rules are production-ready. */
+
+/* CSS variables for theming */
+:root {
+  --obsidian: #0a0f1c;
+  --obsidian-2: #0f172a;
+  --gold: #fbbf24;
+  --good: #22d3ee;
+  --evil: #f43f5e;
+  --radius-xl: 16px;
+  --radius-2xl: 20px;
+}
+
+/* Smooth scrolling + scrollbar */
+html { scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.15) transparent; }
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 999px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.22); }
+::-webkit-scrollbar-track { background: transparent; }
+
+/* Focus ring — high contrast for accessibility */
+*:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 2px;
+}
+
+/* Card 3D flip for role reveal (used via JS toggle) */
+.card-3d {
+  perspective: 1200px;
+}
+.card-3d-inner {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  transform-style: preserve-3d;
+  transition: transform 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.card-3d.flipped .card-3d-inner {
+  transform: rotateY(180deg);
+}
+.card-face {
+  position: absolute;
+  inset: 0;
+  backface-visibility: hidden;
+  border-radius: var(--radius-2xl);
+  overflow: hidden;
+}
+.card-face.back {
+  transform: rotateY(180deg);
+}
+
+/* Quest node glow states */
+.quest-node {
+  position: relative;
+  transition: all 0.45s ease;
+}
+.quest-node.success {
+  background: linear-gradient(135deg, #0e7490, #22d3ee);
+  border-color: rgba(34,211,238,0.6) !important;
+  box-shadow: 0 0 24px rgba(34,211,238,0.45), inset 0 1px 0 rgba(255,255,255,0.2);
+}
+.quest-node.fail {
+  background: linear-gradient(135deg, #9f1239, #f43f5e);
+  border-color: rgba(244,63,94,0.6) !important;
+  box-shadow: 0 0 24px rgba(244,63,94,0.45), inset 0 1px 0 rgba(255,255,255,0.15);
+}
+.quest-node.active {
+  animation: pulseActive 1.8s ease-in-out infinite;
+  border-color: rgba(251,191,36,0.9) !important;
+}
+@keyframes pulseActive {
+  0%,100% { box-shadow: 0 0 0 0 rgba(251,191,36,0.4), 0 0 20px rgba(251,191,36,0.2); }
+  50% { box-shadow: 0 0 0 8px rgba(251,191,36,0), 0 0 30px rgba(251,191,36,0.35); }
+}
+
+/* Proposal tracker dots */
+.tracker-dot {
+  transition: all 0.35s ease;
+}
+.tracker-dot.filled {
+  background: linear-gradient(135deg, #be123c, #f43f5e);
+  border-color: rgba(244,63,94,0.5);
+  box-shadow: 0 0 12px rgba(244,63,94,0.4);
+}
+.tracker-dot.pending {
+  background: rgba(255,255,255,0.06);
+  border-color: rgba(255,255,255,0.1);
+}
+
+/* Player card selection states */
+.player-card {
+  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease, background 0.2s ease;
+}
+.player-card:hover {
+  transform: translateY(-2px);
+}
+.player-card.selected {
+  border-color: rgba(251,191,36,0.9) !important;
+  background: rgba(251,191,36,0.08) !important;
+  box-shadow: 0 0 0 1px rgba(251,191,36,0.4), 0 8px 24px rgba(0,0,0,0.4);
+}
+.player-card.leader {
+  border-color: rgba(251,191,36,0.5) !important;
+}
+.player-card.on-team {
+  border-color: rgba(34,211,238,0.45) !important;
+  background: rgba(34,211,238,0.06) !important;
+}
+
+/* Vote reveal animation */
+.vote-badge {
+  animation: popIn 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+@keyframes popIn {
+  0% { transform: scale(0.6); opacity: 0; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+/* Quest card selection */
+.quest-card {
+  transition: all 0.2s ease;
+  cursor: pointer;
+}
+.quest-card:hover {
+  transform: translateY(-3px) scale(1.02);
+}
+.quest-card.selected {
+  ring: 2px solid var(--gold);
+  transform: translateY(-4px) scale(1.03);
+  box-shadow: 0 12px 32px rgba(0,0,0,0.5), 0 0 0 2px var(--gold);
+}
+.quest-card.success.selected {
+  box-shadow: 0 12px 32px rgba(0,0,0,0.5), 0 0 0 2px var(--good), 0 0 20px rgba(34,211,238,0.4);
+}
+.quest-card.fail.selected {
+  box-shadow: 0 12px 32px rgba(0,0,0,0.5), 0 0 0 2px var(--evil), 0 0 20px rgba(244,63,94,0.4);
+}
+
+/* Log entry */
+.log-entry {
+  animation: slideUp 0.3s ease-out both;
+}
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Modal backdrop via dialog */
+dialog::backdrop {
+  background: rgba(10,15,28,0.82);
+  backdrop-filter: blur(8px);
+}
+
+/* Timer circular progress */
+.timer-ring {
+  transform: rotate(-90deg);
+  transform-origin: 50% 50%;
+}
+.timer-ring-bg {
+  stroke: rgba(255,255,255,0.08);
+}
+.timer-ring-fg {
+  stroke: var(--gold);
+  transition: stroke-dashoffset 1s linear, stroke 0.3s ease;
+}
+.timer-ring-fg.warn {
+  stroke: var(--evil);
+}
+
+/* Toast */
+.toast {
+  pointer-events: auto;
+  animation: slideUp 0.3s ease-out, fadeOut 0.3s ease-in 2.7s forwards;
+  max-width: 420px;
+  word-wrap: break-word;
+}
+@keyframes fadeOut {
+  to { opacity: 0; transform: translateY(-6px); }
+}
+
+/* Utility: text balance for headings */
+.balance { text-wrap: balance; }
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Mobile drawer for logs */
+@media (max-width: 1023px) {
+  .logs-drawer {
+    max-height: 260px;
+  }
+}
+
+/* Ensure long names ellipsis */
+.truncate-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+/* ——— Exact Table Party theme — dark only (#0a1e2e) ——— */
+body {
+  background-color: #0a1e2e;
+  color: #f0e8d0;
+}

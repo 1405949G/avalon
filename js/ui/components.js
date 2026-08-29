@@ -1,0 +1,515 @@
+/**
+ * js/ui/components.js — Pure render helpers for Quest Track, Player Grid, Proposal Tracker, Timer, etc.
+ * Each export is a function (publicState, dispatch) => HTML string or DOM helper.
+ * No state mutation, no side effects beyond string generation.
+ * Updated for Table Party blended lobby + extra roles.
+ */
+
+import { ALLEGIANCE, EXTRA_ROLES } from '../config.js';
+
+// ——— Quest Track ———
+export function renderQuestTrack(pub) {
+  return `
+    <div class="rounded-2xl bg-[#0f172a]/80 border border-white/[0.08] backdrop-blur-xl p-4 sm:p-5 shadow-xl">
+      <div class="flex items-center justify-between mb-3">
+        <h3 class="font-display font-bold text-[13px] tracking-[0.14em] text-white">QUEST PROGRESS</h3>
+        <span class="text-xs font-medium text-stone-400">${pub.quests.filter(q=>q.status!=='PENDING').length}/5 completed</span>
+      </div>
+      <div class="flex items-center gap-1.5 sm:gap-2 overflow-x-auto scrollbar-thin pb-2">
+        ${pub.quests.map((q,i) => `
+          <div class="contents">
+            ${renderSingleNode(q, i, pub)}
+          </div>
+        `).join('')}
+      </div>
+      <div class="mt-3 flex items-center gap-2 text-[11px]">
+        <span class="inline-flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-good"></span> Good</span>
+        <span class="inline-flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-evil"></span> Evil</span>
+        <span class="ml-auto text-stone-500 hidden sm:inline">Quest 4 with 7+ needs 2 fails</span>
+      </div>
+    </div>
+  `;
+}
+
+function renderSingleNode(q, i, pub) {
+  const isActive = i === pub.currentQuest && pub.phase !== 'GAME_OVER' && pub.phase !== 'ASSASSINATION';
+  const statusCls = q.status === 'SUCCESS' ? 'success' : q.status === 'FAIL' ? 'fail' : 'bg-white/[0.04] border-white/[0.08]';
+  const activeCls = isActive ? 'active' : '';
+  const label = q.status === 'PENDING' ? `${q.size}` : q.status === 'SUCCESS' ? '✓' : '✕';
+  const failBadge = q.failsRequired > 1 ? `<span class="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-amber-400 text-obsidian text-[10px] font-extrabold flex items-center justify-center border border-white/20">2×</span>` : '';
+  return `
+    <div class="flex items-center gap-1.5 sm:gap-2 shrink-0">
+      <div class="quest-node ${statusCls} ${activeCls} border-2 relative w-[74px] sm:w-[84px] h-[88px] sm:h-[92px] rounded-2xl flex flex-col items-center justify-center gap-1">
+        ${failBadge}
+        <span class="text-[10px] font-bold tracking-[0.14em] ${q.status==='PENDING' ? 'text-stone-400' : 'text-white/80'}">QUEST ${i+1}</span>
+        <span class="w-9 h-9 rounded-xl ${q.status==='PENDING' ? 'bg-white/[0.06] border border-white/[0.08]' : 'bg-white/20 border border-white/30'} flex items-center justify-center font-display font-extrabold text-[16px] text-white">${label}</span>
+        <span class="text-[11px] font-medium ${q.status==='FAIL' ? 'text-white/80' : q.status==='SUCCESS' ? 'text-white/70' : 'text-stone-500'}">${q.failCount!=null ? `${q.failCount} fail` : `${q.size} req`}</span>
+        ${isActive ? '<span class="absolute -bottom-1 left-1/2 -translate-x-1/2 w-1.5 h-1.5 rounded-full bg-gold"></span>' : ''}
+      </div>
+      ${i < 4 ? `<div class="w-3 sm:w-5 h-1 rounded-full ${q.status==='SUCCESS' ? 'bg-good/60' : q.status==='FAIL' ? 'bg-evil/60' : 'bg-white/10'}"></div>` : ''}
+    </div>
+  `;
+}
+
+// ——— Proposal Tracker ———
+export function renderProposalTracker(pub) {
+  const dots = Array.from({ length: 5 }, (_, i) => {
+    const filled = i < pub.proposalTracker;
+    return `<div class="tracker-dot ${filled ? 'filled' : 'pending'} w-7 h-7 sm:w-8 sm:h-8 rounded-full border-2 flex items-center justify-center text-[11px] font-bold ${filled ? 'text-white' : 'text-stone-500'}">${filled ? '✕' : i+1}</div>`;
+  }).join('');
+  const danger = pub.proposalTracker >= 3;
+  return `
+    <div class="rounded-2xl ${danger ? 'bg-evil/10 border-evil/30' : 'bg-white/[0.04] border-white/[0.08]'} border p-3 sm:p-4 backdrop-blur">
+      <div class="flex items-center justify-between">
+        <h4 class="font-bold text-[11px] tracking-[0.14em] ${danger ? 'text-evil' : 'text-stone-400'}">PROPOSAL TRACKER</h4>
+        <span class="text-xs font-mono font-bold ${danger ? 'text-evil' : 'text-stone-300'}">${pub.proposalTracker}/5</span>
+      </div>
+      <div class="flex items-center gap-1.5 mt-3">${dots}</div>
+      <p class="text-[11px] ${danger ? 'text-evil/80' : 'text-stone-500'} mt-2 leading-snug">${danger ? '⚠️ One more reject and Evil wins by deadlock!' : '5 rejected proposals → Evil wins. Resets after each quest.'}</p>
+    </div>
+  `;
+}
+
+// ——— Timer (circular, view-only) ———
+export function renderTimer(pub, remainingSec, totalSec) {
+  const pct = totalSec > 0 ? remainingSec / totalSec : 0;
+  const dash = 2 * Math.PI * 22;
+  const offset = dash * (1 - pct);
+  const warn = remainingSec <= 15;
+  return `
+    <div class="rounded-2xl bg-[#0f172a]/80 border border-white/[0.08] p-4 flex items-center gap-4 backdrop-blur">
+      <div class="relative w-14 h-14 shrink-0">
+        <svg width="56" height="56" viewBox="0 0 56 56" class="w-14 h-14">
+          <circle cx="28" cy="28" r="22" fill="none" stroke-width="4" class="timer-ring-bg"/>
+          <circle cx="28" cy="28" r="22" fill="none" stroke-width="4" stroke-linecap="round"
+            class="timer-ring-fg ${warn ? 'warn' : ''} timer-ring"
+            stroke-dasharray="${dash}" stroke-dashoffset="${offset}" />
+        </svg>
+        <span class="absolute inset-0 flex items-center justify-center font-mono font-bold text-sm ${warn ? 'text-evil' : 'text-white'}">${remainingSec}s</span>
+      </div>
+      <div class="min-w-0">
+        <p class="text-[11px] font-bold tracking-[0.14em] text-stone-400">TURN TIMER</p>
+        <p class="text-sm font-medium text-white leading-tight">${timerLabel(pub.phase)}</p>
+        <p class="text-xs text-stone-500">View-only • auto-advances on expiry</p>
+      </div>
+    </div>
+  `;
+}
+
+function timerLabel(phase) {
+  if (phase === 'TEAM_PROPOSAL') return 'Leader is choosing team';
+  if (phase === 'TEAM_VOTE') return 'Voting on team';
+  if (phase === 'QUEST_VOTE') return 'Quest voting (secret)';
+  if (phase === 'ASSASSINATION') return 'Assassin is deciding';
+  return 'Waiting';
+}
+
+// ——— Player Grid ———
+export function renderPlayerGrid(pub, selectedIds = []) {
+  const cards = pub.players.map(p => {
+    const isLeader = p.isLeader;
+    const isSelected = selectedIds.includes(p.id);
+    const onTeam = pub.proposal.teamIds.includes(p.id);
+    const vote = pub.proposal.revealed ? pub.proposal.votes[p.id] : null;
+    const voteBadge = vote ? `<span class="vote-badge absolute -top-2 -right-2 px-2 py-1 rounded-full text-[11px] font-extrabold border ${vote==='APPROVE' ? 'bg-good text-obsidian border-good' : 'bg-evil text-white border-evil'} shadow">${vote==='APPROVE' ? '✓ APPROVE' : '✕ REJECT'}</span>` : '';
+    const teamBadge = onTeam ? `<span class="absolute -bottom-2 left-1/2 -translate-x-1/2 px-2.5 py-1 rounded-full bg-cyan-500 text-white text-[11px] font-bold border border-white/20 shadow">ON TEAM</span>` : '';
+    return `
+      <div data-player-id="${p.id}" class="player-card relative rounded-2xl bg-white/[0.05] border ${isSelected ? 'border-gold' : isLeader ? 'border-gold/40' : 'border-white/[0.08]'} p-3 sm:p-4 flex flex-col items-center text-center gap-2.5 ${isSelected ? 'selected' : ''} ${isLeader ? 'leader' : ''} ${onTeam ? 'on-team' : ''} cursor-pointer select-none">
+        ${voteBadge}
+        <div class="relative">
+          <div class="w-12 h-12 sm:w-14 sm:h-14 rounded-2xl bg-gradient-to-br from-slate-700 to-slate-800 border border-white/10 flex items-center justify-center font-display font-extrabold text-lg text-white shadow-inner">
+            ${escape(p.name[0] || '?')}
+          </div>
+          ${isLeader ? '<span class="absolute -top-2 -left-2 w-7 h-7 rounded-full bg-gold text-obsidian flex items-center justify-center text-[13px] shadow shadow-gold/30 border border-white/20">👑</span>' : ''}
+          ${p.isBot ? '<span class="absolute -bottom-1 -right-1 px-1.5 py-0.5 rounded-full bg-white/10 border border-white/20 text-[10px] font-bold tracking-wide text-stone-300">BOT</span>' : ''}
+        </div>
+        <div class="min-w-0 w-full">
+          <p class="font-semibold text-sm text-white truncate-name" title="${escape(p.name)}">${escape(p.name)}</p>
+          <p class="text-[11px] font-medium tracking-wide ${isLeader ? 'text-gold' : 'text-stone-500'}">${isLeader ? 'LEADER' : p.isBot ? 'AI Player' : 'Human'}</p>
+        </div>
+        ${teamBadge}
+      </div>
+    `;
+  }).join('');
+
+  return `
+    <div class="rounded-2xl bg-[#0f172a]/60 border border-white/[0.06] p-4 sm:p-5 backdrop-blur">
+      <div class="flex items-center justify-between mb-3">
+        <h3 class="font-display font-bold text-[13px] tracking-[0.14em] text-white">ROUND TABLE</h3>
+        <span class="text-xs text-stone-500">${pub.players.length} players • Leader picks ${pub.quests[pub.currentQuest]?.size ?? '?'} </span>
+      </div>
+      <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 sm:gap-3.5">
+        ${cards}
+      </div>
+    </div>
+  `;
+}
+
+// ——— NEW: Table Party Lobby (screenshot-faithful, blended) ———
+export function renderLobby(ctx) {
+  // ctx: { roomCode, playersDraft, extraRoles, myName, inviteLink, viewMode }
+  const roomCode = ctx.roomCode || '----';
+  const players = ctx.playersDraft || [];
+  const extra = ctx.extraRoles || {};
+  const myName = ctx.myName || players[0]?.name || 'YOU';
+  const need = Math.max(0, 5 - players.length);
+  const canStart = players.length >= 5 && players.length <= 10;
+  const inviteLink = ctx.inviteLink || '';
+
+  // Avatar bubbles — show up to 10, with YOU badge on first human, plus dashed waiting slots
+  const maxShow = 10;
+  const avatars = players.map((p, i) => {
+    const isYou = i === 0; // first player is host / you
+    const color = isYou ? 'border-emerald-400' : 'border-white/15';
+    const bg = isYou ? 'bg-gradient-to-br from-amber-200 to-orange-100' : 'bg-gradient-to-br from-slate-600 to-slate-700';
+    const botBadge = p.isBot ? '<span class="absolute -bottom-1 -right-1 px-1 py-0 rounded-full bg-white/90 text-[8px] font-extrabold text-obsidian border border-white">BOT</span>' : '';
+    const youBadge = isYou ? '<span class="absolute -bottom-2 left-1/2 -translate-x-1/2 px-2 py-0.5 rounded-full bg-white text-obsidian text-[9px] font-extrabold tracking-widest">YOU</span>' : '';
+    const editHint = isYou ? 'data-edit-idx="'+i+'"' : '';
+    return `
+      <div class="flex flex-col items-center gap-1.5 relative group">
+        <div ${editHint} class="relative w-[56px] h-[56px] sm:w-[60px] sm:h-[60px] rounded-full border-2 ${color} ${bg} flex items-center justify-center text-lg font-extrabold text-white overflow-hidden shadow-md cursor-pointer hover:scale-105 transition-transform">
+          ${p.name ? escape(p.name[0].toUpperCase()) : '?'}
+          ${botBadge}
+        </div>
+        ${youBadge}
+        <span class="text-xs font-bold text-white mt-1">${escape(p.name || 'Player')}</span>
+        ${isYou ? '<span class="w-1.5 h-1.5 rounded-full bg-emerald-400 absolute top-0 right-1 border-2 border-[#0e2533]"></span>' : ''}
+      </div>
+    `;
+  }).join('');
+
+  const waitingSlots = Math.max(0, Math.min(10, Math.max(1, 5 - players.length)));
+  const waiting = Array.from({length: waitingSlots}, () => `
+    <div class="flex flex-col items-center gap-1.5">
+      <div class="w-[56px] h-[56px] sm:w-[60px] sm:h-[60px] rounded-full border-2 border-dashed border-white/25 bg-white/[0.03] flex items-center justify-center">
+        <span class="w-6 h-0.5 bg-white/20 rounded-full"></span>
+      </div>
+      <span class="text-xs font-medium text-stone-500">Waiting...</span>
+    </div>
+  `).join('');
+
+  // Extra roles toggles
+  const roleButtons = EXTRA_ROLES.map(r => {
+    const active = !!extra[r.key];
+    const bg = active ? 'bg-[#3aa8d6] border-[#3aa8d6] text-white' : 'bg-white/[0.06] border-white/15 text-stone-300 hover:bg-white/10';
+    const sideColor = r.side === 'GOOD' ? 'text-cyan-200' : 'text-rose-200';
+    return `
+      <button data-extra="${r.key}" class="text-left rounded-full px-3.5 py-2.5 border flex flex-col leading-none ${bg} transition-colors">
+        <span class="text-[13px] font-extrabold tracking-wide ${active ? 'text-white' : 'text-white'}">${r.label}</span>
+        <span class="text-[10px] font-bold tracking-[0.14em] ${active ? 'text-white/80' : sideColor}">${r.side}</span>
+      </button>
+    `;
+  }).join('');
+
+  // Bottom bar text
+  const bottomText = need > 0 ? `Needs ${need} more player${need!==1?'s':''}` : (players.length>10 ? 'Too many players' : 'Ready to quest!');
+
+  return `
+    <div class="max-w-[480px] mx-auto px-4 sm:px-0">
+      <!-- Top bar like screenshot -->
+      <div class="flex items-center justify-between pt-2">
+        <button id="btn-lobby-back" class="w-8 h-8 rounded-full bg-white/10 hover:bg-white/15 border border-white/10 flex items-center justify-center text-white/70">‹</button>
+        <div class="flex flex-col items-center">
+          <div class="w-10 h-10 rounded-full bg-gradient-to-br from-sky-300 to-blue-600 border-2 border-white/20 flex items-center justify-center shadow-lg">🗡️</div>
+        </div>
+        <button id="btn-lobby-help" class="w-8 h-8 rounded-full bg-white/10 hover:bg-white/15 border border-white/10 flex items-center justify-center text-white/70">?</button>
+      </div>
+      <div class="text-center -mt-1">
+        <h1 class="font-display font-extrabold text-[22px] tracking-wide text-[#f0e8d0]">Quest of Shadows</h1>
+        <p class="text-sm text-white/60 -mt-1 font-medium">Invite your friends</p>
+      </div>
+
+      <!-- Invite Code Card — screenshot teal -->
+      <div class="mt-5 rounded-[24px] bg-[#29546c] border border-white/10 shadow-xl p-6 sm:p-7 text-center relative overflow-hidden">
+        <div class="absolute inset-0 opacity-20" style="background: radial-gradient(ellipse at top, rgba(255,255,255,0.15), transparent 60%);"></div>
+        <div class="relative">
+          <div class="font-display font-black text-[42px] sm:text-[52px] leading-none tracking-[0.18em] text-[#f3ecd8]" style="text-shadow: 0 2px 0 rgba(0,0,0,0.25), 0 8px 24px rgba(0,0,0,0.3);">${escape(roomCode)}</div>
+          <p class="text-[13px] text-white/70 mt-2 leading-snug">Friends open <span class="text-white font-semibold">Table Party</span> and tap <span class="text-white font-bold">Join a friend’s game</span></p>
+          <button id="btn-share-link" data-link="${escape(inviteLink)}" class="mt-4 px-5 py-2.5 rounded-full bg-[#f3ecd8] hover:bg-white text-[#14364d] text-sm font-extrabold tracking-wide shadow-md transition-colors">
+            Share invite link
+          </button>
+          <p class="text-[11px] text-white/40 mt-2 font-mono break-all">${escape(inviteLink)}</p>
+        </div>
+      </div>
+
+      <!-- Avatars row -->
+      <div class="mt-5 flex gap-3 sm:gap-4 overflow-x-auto scrollbar-thin pb-2 justify-start sm:justify-center">
+        ${avatars}
+        ${waiting}
+      </div>
+
+      <!-- Change name quick edit (below avatars, for host) -->
+      <div class="mt-3 flex gap-2">
+        <input id="input-my-name" value="${escape(myName)}" maxlength="16" placeholder="Your name"
+          class="flex-1 px-3.5 py-2.5 rounded-xl bg-white/10 border border-white/15 text-white placeholder:text-white/40 text-sm font-medium outline-none focus:border-[#3aa8d6] focus:bg-white/15" />
+        <button id="btn-add-bot" class="px-3.5 py-2.5 rounded-xl bg-white/10 hover:bg-white/15 border border-white/10 text-white text-sm font-semibold">+ Bot</button>
+        <button id="btn-add-human" class="px-3.5 py-2.5 rounded-xl bg-white/10 hover:bg-white/15 border border-white/10 text-white text-sm font-semibold">+ Friend</button>
+      </div>
+      <p class="text-xs text-white/40 mt-1.5 text-center">Tap avatar to edit • Add up to 10 • Works on each player’s own phone</p>
+
+      <!-- Trust card -->
+      <div class="mt-4 rounded-2xl bg-black/25 border border-white/10 p-3 sm:p-3.5 flex items-center justify-between">
+        <div>
+          <p class="text-sm font-bold text-[#8ec8e6]">Trust someone. Quest anyway.</p>
+          <p class="text-xs text-white/50 font-medium">5–10 players · 15–25 min</p>
+        </div>
+        <button id="btn-change-game" class="text-xs font-extrabold tracking-widest text-white/60 hover:text-white/90">CHANGE GAME</button>
+      </div>
+
+      <!-- Game options — collapsible -->
+      <div class="mt-4 rounded-2xl bg-[#0e2231]/80 border border-white/10 backdrop-blur p-4 shadow-xl">
+        <button id="btn-toggle-options" class="w-full flex items-center justify-between">
+          <span class="font-extrabold text-white text-sm">Game options</span>
+          <span class="w-6 h-6 rounded-full bg-white/10 flex items-center justify-center text-white/60 text-xs">⌄</span>
+        </button>
+        <div id="panel-extra-roles" class="mt-4 pt-4 border-t border-white/10">
+          <h4 class="font-extrabold text-white text-sm">Extra roles</h4>
+          <p class="text-xs text-white/50 mt-1 leading-snug">Merlin and the Assassin are always dealt. Tap to add the rest.</p>
+          <div class="grid grid-cols-2 gap-2.5 mt-3">
+            ${roleButtons}
+          </div>
+          <div class="mt-3 rounded-xl bg-amber-400/10 border border-amber-400/20 p-2.5 flex gap-2.5">
+            <span class="text-amber-300 text-xs mt-0.5">ⓘ</span>
+            <p class="text-xs leading-snug text-amber-100/80"><span class="font-bold text-amber-200">Heads up:</span> Percival sees Merlin (Morgana fools him). Mordred hides from Merlin. Oberon is isolated — evil don’t know him.</p>
+          </div>
+          <!-- Advanced: player count + remove buttons -->
+          <div class="mt-4 flex items-center justify-between">
+            <span class="text-xs font-bold tracking-widest text-white/60">${players.length}/10 players</span>
+            <div class="flex gap-1.5">
+              <button data-remove-last class="px-3 py-1.5 rounded-full bg-white/10 hover:bg-evil/20 border border-white/10 text-xs font-bold text-white/70">− Remove</button>
+              <button id="btn-clear-lobby" class="px-3 py-1.5 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 text-xs font-bold text-white/50">Clear</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Blend: show quest track preview in lobby (small) -->
+      <div class="mt-4 rounded-2xl bg-[#0f172a]/40 border border-white/10 p-3">
+        <p class="text-xs font-bold tracking-widest text-white/60">QUEST PREVIEW</p>
+        <p class="text-xs text-white/40 mt-1">5 quests • Fail threshold: 1 (Quest 4 needs 2 with 7+)</p>
+        <div class="mt-2 flex gap-1.5 justify-center">
+          ${[2,3,2,3,3].map((s,i)=>`<span class="w-8 h-8 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center text-xs font-bold text-white/70">${s}</span>`).join('')}
+        </div>
+      </div>
+
+      <div class="h-20"></div>
+    </div>
+
+    <!-- Bottom sticky bar — like screenshot -->
+    <div class="fixed bottom-0 inset-x-0 p-4 bg-gradient-to-t from-[#0a1e2e]/90 to-transparent backdrop-blur-sm pointer-events-none">
+      <div class="max-w-[480px] mx-auto pointer-events-auto">
+        ${canStart
+          ? `<button id="btn-start" class="w-full py-4 rounded-full bg-[#f3ecd8] hover:bg-white text-[#0e2533] font-extrabold tracking-wide shadow-xl transition-colors">Start Quest — ${players.length} players</button>`
+          : `<div class="w-full py-3.5 rounded-full bg-[#0f2231] border border-white/10 text-center text-white/50 font-bold text-sm shadow-xl">${bottomText}</div>`
+        }
+        <p class="text-center text-xs text-white/30 mt-2">Each player opens the link on their own phone — roles stay private</p>
+      </div>
+    </div>
+  `;
+}
+
+export function renderPrivateRole(pub, myId) {
+  // Per-device private role view — replaces Pass & Play
+  const me = pub.players.find(p=>p.id===myId) || pub.players[0];
+  // This will be handled by modals, but we provide an inline card for the waiting room
+  const isRevealed = me ? pub.revealed[pub.players.findIndex(p=>p.id===myId)] : false;
+  const allRevealed = pub.revealed.every(Boolean);
+  return `
+    <div class="rounded-2xl bg-[#0f172a]/80 border border-white/[0.08] p-6 text-center shadow-xl max-w-[560px] mx-auto">
+      <div class="w-14 h-14 mx-auto rounded-2xl bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center text-2xl">🛡️</div>
+      <h2 class="font-display font-extrabold text-xl text-white mt-3">YOUR ROLE IS SECURE</h2>
+      <p class="text-sm text-stone-400 mt-2">On your phone, tap to reveal. No one else can see it — even the host.</p>
+      <div class="mt-5 rounded-xl bg-white/[0.04] border border-white/[0.06] p-4">
+        <p class="text-xs tracking-widest font-bold text-stone-500">YOU ARE</p>
+        <p class="font-display font-extrabold text-2xl text-white mt-1">${escape(me?.name || 'You')}</p>
+        <p class="text-sm ${isRevealed ? 'text-emerald-400' : 'text-amber-300'} mt-1">${isRevealed ? '✓ You have viewed' : 'Tap below to reveal privately'}</p>
+      </div>
+      <button id="btn-private-reveal" data-myid="${me?.id || ''}" class="mt-4 w-full py-3.5 rounded-xl bg-gold text-obsidian font-extrabold hover:bg-amber-300 shadow-lg shadow-gold/20">
+        ${isRevealed ? 'VIEW AGAIN (private)' : 'TAP TO REVEAL YOUR ROLE'}
+      </button>
+      <p class="text-xs text-stone-500 mt-2">${pub.revealed.filter(Boolean).length}/${pub.players.length} players have viewed</p>
+      ${allRevealed ? '<p class="text-emerald-300 text-sm font-bold mt-3">All viewed — quest will begin automatically</p>' : '<p class="text-stone-500 text-xs mt-3">Waiting for others on their devices…</p>'}
+    </div>
+  `;
+}
+
+export function renderRoleReveal(pub) {
+  // Kept for backward compat — now delegates to private view for first player
+  const current = pub.players[pub.revealIndex];
+  const viewed = pub.revealed[pub.revealIndex];
+  const progress = pub.revealed.filter(Boolean).length;
+  return `
+    <div class="rounded-2xl bg-[#0f172a]/80 border border-white/[0.08] backdrop-blur-xl p-6 sm:p-8 text-center shadow-xl">
+      <h2 class="font-display font-extrabold text-xl text-white">ROLE DISCOVERY (distributed)</h2>
+      <p class="text-sm text-stone-400 mt-2">Each player now reveals on their own phone. Use the View As switcher to preview.</p>
+      <div class="mt-6 rounded-xl bg-white/[0.04] border border-white/[0.06] p-4 max-w-[420px] mx-auto">
+        <p class="text-xs tracking-[0.14em] font-bold text-stone-500">PROGRESS</p>
+        <p class="text-sm text-stone-300 mt-1">${progress}/${pub.players.length} viewed</p>
+        <div class="mt-3 flex items-center justify-center gap-1.5">
+          ${pub.players.map((_,i)=>`<span class="h-1.5 rounded-full transition-all ${pub.revealed[i] ? 'w-6 bg-good' : 'w-4 bg-white/15'}"></span>`).join('')}
+        </div>
+      </div>
+      <div class="mt-6 flex justify-center">
+        <button id="btn-view-role" class="px-6 py-3.5 rounded-xl bg-gold text-obsidian font-extrabold">View as ${escape(current?.name || '')}</button>
+      </div>
+    </div>
+  `;
+}
+
+function escape(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+// ——— EXACT TABLE PARTY REPLICATION ———
+
+export function renderExactHeader(current, total) {
+  return `
+    <div class="flex items-center justify-between px-1">
+      <button id="btn-exact-back" class="w-9 h-9 rounded-full bg-white/10 border border-white/10 flex items-center justify-center text-white/70 text-lg">‹</button>
+      <h1 class="font-display font-bold text-white text-[15px] tracking-wide">Quest of Shadows</h1>
+      <div class="flex gap-2 items-center">
+        <span class="px-3 py-1 rounded-full bg-[#1e4a62] border border-white/15 text-[#7ec8e6] text-xs font-bold">${current}/${total}</span>
+        <button id="btn-exact-rules" class="w-9 h-9 rounded-full bg-white/10 border border-white/10 flex items-center justify-center text-white/70">?</button>
+      </div>
+    </div>
+  `;
+}
+
+export function renderExactQuestTrack(pub) {
+  const sizes = pub.quests.map(q=> q.size);
+  // For lobby preview, sizes are [2,3,2,3,3] etc. For in-game, use pub.quests
+  const currentQuest = pub.currentQuest;
+  const circles = sizes.map((s,i)=>{
+    const isCurrent = i===currentQuest;
+    const status = pub.quests[i]?.status;
+    let bg = 'bg-white/5 border-white/15 text-white/60';
+    if (status==='SUCCESS') bg='bg-emerald-500 border-emerald-400 text-white';
+    else if (status==='FAIL') bg='bg-rose-500 border-rose-400 text-white';
+    else if (isCurrent) bg='bg-[#3aa8d6]/20 border-[#3aa8d6] text-white ring-2 ring-[#3aa8d6]/40';
+    return `<div class="w-9 h-9 rounded-full border-2 ${bg} flex items-center justify-center text-sm font-black">${s}</div>`;
+  }).join('');
+  const rejectedDots = Array.from({length:5}, (_,i)=>{
+    const filled = i < pub.proposalTracker;
+    return `<span class="w-2 h-2 rounded-full ${filled?'bg-rose-500':'bg-white/20'} border border-white/10"></span>`;
+  }).join('');
+  const label = pub.proposalTracker>=5 ? 'FAILED' : pub.proposalTracker>0 ? 'REJECTED' : 'REJECTED';
+  return `
+    <div class="rounded-2xl bg-[#0f2231]/60 border border-white/10 p-3">
+      <div class="flex justify-center gap-2">${circles}</div>
+      <div class="flex justify-center items-center gap-1.5 mt-2">
+        <span class="text-xs font-bold tracking-widest text-white/40">${label}</span>
+        <span class="flex gap-1">${rejectedDots}</span>
+      </div>
+    </div>
+  `;
+}
+
+export function renderExactAllegiance(pub, myId) {
+  const me = pub.players.find(p=> p.id===myId) || { role: 'LOYAL', name: 'You' };
+  // Need full player data for role, fallback to pub
+  const full = pub.players.find(p=> p.id===myId);
+  // Try to get role from state via window? We'll need to pass full state, but for now use pub's extra? Instead, we will expect caller to provide full role via pub. For exact, we need role info.
+  // This function will be called with pub that has been enriched with myRole via getPrivateState in app.js wrapper.
+  // For now, we handle both: if pub has myRole, use it, else show Loyal.
+  const role = me.role || 'LOYAL';
+  const isEvil = role==='ASSASSIN' || role==='MORGANA' || role==='MORDRED' || role==='OBERON' || role==='MINION';
+  const allegiance = isEvil ? 'Sworn to evil' : 'Loyal to Arthur';
+  const allegianceColor = isEvil ? 'text-[#ff6b6b]' : 'text-[#5eead4]';
+  const roleLabel = {
+    'MERLIN':'Merlin',
+    'PERCIVAL':'Percival',
+    'LOYAL':'Loyal Servant',
+    'ASSASSIN':'The Assassin',
+    'MORGANA':'Morgana',
+    'MORDRED':'Mordred',
+    'OBERON':'Oberon',
+    'MINION':'Minion'
+  }[role] || role;
+  const roleDesc = {
+    'MERLIN':'You see the servants of evil. Guide Arthur without being found.',
+    'PERCIVAL':'You see Merlin. Protect him, but Morgana may fool you.',
+    'LOYAL':'Nobody told you anything. Everything you learn, you learn at this table.',
+    'ASSASSIN':'If good takes three quests, you get one shot at naming Merlin.',
+    'MORGANA':'To Percival you look exactly like Merlin. Be worth believing.',
+    'MORDRED':'You are hidden from Merlin. Stay in the shadows.',
+    'OBERON':'You see no one, and no one sees you.',
+    'MINION':'You know your fellow evil. Sabotage from within.'
+  }[role] || '';
+  return `
+    <div class="rounded-2xl bg-[#142a3d]/80 border border-white/10 p-5 text-center">
+      <p class="text-xs font-bold tracking-[0.18em] text-[#7ec8e6]">YOUR ALLEGIANCE</p>
+      <p class="font-display font-black text-[28px] leading-none ${allegianceColor} mt-1">${escape(allegiance)}</p>
+      <div class="w-12 h-0.5 bg-white/10 mx-auto my-3"></div>
+      <h2 class="font-display font-bold text-[22px] text-white leading-none">${escape(roleLabel)}</h2>
+      <p class="text-sm text-white/60 mt-1.5 leading-snug max-w-[320px] mx-auto">${escape(roleDesc)}</p>
+    </div>
+  `;
+}
+
+export function renderExactVision(pub, myId) {
+  // For exact, we need vision info — caller will provide via getVision
+  // This is a placeholder that app.js will fill with actual names
+  // We keep it generic here and let app.js pass HTML
+  return ``;
+}
+
+export function renderExactTableSummary(pub) {
+  const total = pub.players.length;
+  // Count loyal vs evil based on roles if available, else estimate from quest setup
+  // For exact screenshot: "5 at the table — 3 loyal, 2 sworn to evil."
+  let loyal = 3, evil = 2;
+  if (pub.players.length===5) { loyal=3; evil=2; }
+  else if (pub.players.length===6) { loyal=4; evil=2; }
+  else if (pub.players.length===7) { loyal=4; evil=3; }
+  else if (pub.players.length===8) { loyal=5; evil=3; }
+  else if (pub.players.length===9) { loyal=6; evil=3; }
+  else if (pub.players.length===10) { loyal=6; evil=4; }
+  // If extraRoles enabled, pill list should reflect enabled roles
+  const pills = [];
+  if (true) pills.push('Merlin');
+  if (pub.extraRoles?.percival) pills.push('Percival');
+  // Always show Assassin pill as in screenshot
+  pills.push('The Assassin');
+  if (pub.extraRoles?.morgana) pills.push('Morgana');
+  if (pub.extraRoles?.mordred) pills.push('Mordred');
+  if (pub.extraRoles?.oberon) pills.push('Oberon');
+  return `
+    <div class="text-center mt-3">
+      <p class="text-sm text-white/70">${total} at the table — ${loyal} loyal, ${evil} sworn to evil.</p>
+      <div class="flex flex-wrap justify-center gap-1.5 mt-2">
+        ${pills.map(p=> `<span class="px-3 py-1 rounded-full bg-white/10 border border-white/10 text-xs font-bold text-white/70">${escape(p)}</span>`).join('')}
+      </div>
+    </div>
+  `;
+}
+
+export function renderExactAvatarRow(pub, myId, statusMap) {
+  // statusMap: {playerId: 'READY'|'READING'}
+  const avatars = pub.players.map(p=>{
+    const isYou = p.id===myId;
+    const status = statusMap ? (statusMap[p.id] || (pub.revealed && pub.revealed[pub.players.findIndex(x=>x.id===p.id)] ? 'READY' : 'READING')) : 'READY';
+    const isReady = status==='READY';
+    const bg = isYou ? 'bg-[#f3ecd8] text-[#0e2533]' : (p.isBot ? 'bg-[#ff6b6b] text-black' : 'bg-[#2a3a4a] text-white/60');
+    const initials = escape((p.name||'??').slice(0,2).toUpperCase());
+    const border = isReady ? 'border-emerald-400' : 'border-white/15';
+    const dot = isReady ? '<span class="absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-emerald-500 border-2 border-[#0a1e2e] flex items-center justify-center text-[10px] text-white">✓</span>' : '';
+    return `
+      <div class="flex flex-col items-center gap-1 min-w-[56px]">
+        <div class="relative w-12 h-12 rounded-full ${bg} border-2 ${border} flex items-center justify-center font-black text-sm overflow-hidden">
+          ${initials}
+          ${dot}
+        </div>
+        <span class="text-xs font-bold ${isYou?'text-white': 'text-white/70'} truncate max-w-[56px]">${escape(p.name)}${isYou?'<span class="ml-1 px-1.5 py-0.5 rounded-full bg-[#f3ecd8] text-obsidian text-[9px] font-black">YOU</span>':''}</span>
+        <span class="text-[10px] font-black tracking-widest ${isReady?'text-emerald-400':'text-white/30'}">${status}</span>
+      </div>
+    `;
+  }).join('');
+  return `<div class="flex gap-3 overflow-x-auto scrollbar-thin pb-1 justify-start sm:justify-center">${avatars}</div>`;
+}
+
+export function renderExactBottomButton(text, id, opts={}) {
+  const variant = opts.variant || 'primary'; // primary = light blue, danger = red, ghost
+  let cls = 'w-full py-4 rounded-full bg-[#7ec8e6] hover:bg-[#a0d8ef] text-[#0a1e2e] font-black tracking-wide shadow-xl';
+  if (variant==='danger') cls='w-full py-4 rounded-full bg-[#1a2a3a] border border-rose-400/50 text-rose-300 font-bold';
+  if (variant==='ghost') cls='w-full py-4 rounded-full bg-white/5 border border-white/10 text-white/70 font-bold';
+  const disabled = opts.disabled ? 'disabled opacity-50 cursor-not-allowed' : '';
+  return `<button id="${id}" ${disabled} class="${cls} transition-colors">${escape(text)}</button>`;
+}

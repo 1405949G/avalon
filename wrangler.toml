@@ -1,0 +1,14 @@
+name = "avalon-quest-of-shadows"
+type = "javascript"
+compatibility_date = "2024-01-01"
+
+# For Cloudflare Pages, this is optional — Pages will use functions/ directly.
+# If you use `wrangler pages publish`, the KV binding is configured in the dashboard:
+#  Pages → Settings → Functions → KV namespace bindings → Variable: AVALON_ROOMS
+
+# For local `wrangler pages dev` with KV:
+# wrangler pages dev . --kv AVALON_ROOMS
+
+[env.production]
+# Add your KV namespace ID here after creating it:
+# kv_namespaces = [{ binding = "AVALON_ROOMS", id = "your-kv-id" }]

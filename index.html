@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="The Resistance: Avalon — Quest of Shadows. A dark medieval social deduction game for 5-10 players. Each player on their own phone." />
+  <meta name="theme-color" content="#0a0f1c" />
+  <title>AVALON • Quest of Shadows</title>
+  <!-- Fonts: Cinzel (medieval headings) + Inter (body) + JetBrains Mono (logs) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <!-- Tailwind CDN — config MUST be set before load -->
+  <script>
+    tailwind = {}; // ensure global exists
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            'display': ['Cinzel', 'serif'],
+            'sans': ['Inter', 'system-ui', 'sans-serif'],
+            'mono': ['JetBrains Mono', 'monospace'],
+          },
+          colors: {
+            'obsidian': '#0a0f1c',
+            'obsidian-2': '#0f172a',
+            'parchment': '#f8f6f0',
+            'gold': '#fbbf24',
+            'gold-dim': '#d97706',
+            'good': '#22d3ee',
+            'good-dim': '#0891b2',
+            'evil': '#f43f5e',
+            'evil-dim': '#be123c',
+          },
+          animation: {
+            'pulse-glow': 'pulseGlow 2s ease-in-out infinite',
+            'shake': 'shake 0.4s ease-in-out',
+            'flip': 'flip 0.6s ease-in-out',
+            'slide-up': 'slideUp 0.3s ease-out',
+          },
+          keyframes: {
+            pulseGlow: {
+              '0%,100%': { boxShadow: '0 0 20px rgba(251,191,36,0.3)' },
+              '50%': { boxShadow: '0 0 40px rgba(251,191,36,0.6)' },
+            },
+            shake: {
+              '0%,100%': { transform: 'translateX(0)' },
+              '25%': { transform: 'translateX(-4px)' },
+              '75%': { transform: 'translateX(4px)' },
+            },
+            flip: {
+              '0%': { transform: 'rotateY(0)' },
+              '100%': { transform: 'rotateY(180deg)' },
+            },
+            slideUp: {
+              '0%': { transform: 'translateY(8px)', opacity: '0' },
+              '100%': { transform: 'translateY(0)', opacity: '1' },
+            }
+          }
+        }
+      }
+    };
+  </script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="css/styles.css" />
+  <!-- Early error trap + boot loader -->
+  <script>
+    // Flag shared between module and bundle to avoid double-boot
+    window.__AVALON_BOOTED__ = false;
+    window.__AVALON_BUNDLE_LOADED__ = false;
+    // Global error reporter — surfaces hidden module errors instead of silent "Forging..."
+    window.__AVALON_ERRORS__ = [];
+    window.addEventListener('error', function(e) {
+      var msg = (e.error && e.error.message) ? e.error.message : e.message;
+      // Ignore CDN font errors
+      if (msg && msg.indexOf('cdn.tailwindcss') !== -1) return;
+      window.__AVALON_ERRORS__.push(msg + ' @ ' + (e.filename || '') + ':' + (e.lineno || ''));
+      console.error('[Avalon error]', e.error || msg);
+      // If boot hasn't happened within 1s and we have errors, show diagnostic
+      setTimeout(maybeShowBootError, 800);
+    });
+    window.addEventListener('unhandledrejection', function(e) {
+      var msg = e.reason ? (e.reason.message || String(e.reason)) : 'unhandled rejection';
+      window.__AVALON_ERRORS__.push(msg);
+      console.error('[Avalon rejection]', e.reason);
+      setTimeout(maybeShowBootError, 800);
+    });
+    function maybeShowBootError() {
+      if (window.__AVALON_BOOTED__) return;
+      var loading = document.getElementById('loading');
+      // Only show if still stuck after boot should have happened
+      if (!loading) return;
+      var errs = window.__AVALON_ERRORS__;
+      if (errs.length === 0) return; // still waiting, maybe just slow
+      showBootDiagnostic(errs);
+    }
+    function showBootDiagnostic(errs) {
+      var loading = document.getElementById('loading');
+      if (!loading) return;
+      var app = document.getElementById('app');
+      var detail = errs.slice(0,3).map(function(m){ return '<code class="block text-xs bg-black/40 border border-white/10 rounded p-2 mt-1 break-all">' + escapeHtml(m) + '</code>'; }).join('');
+      loading.outerHTML = '<div class="max-w-[640px] mx-auto rounded-2xl bg-evil/10 border border-evil/30 p-6 text-left shadow-xl">'
+        + '<h2 class="font-display font-bold text-evil">Boot failed — trying fallback…</h2>'
+        + '<p class="text-sm text-stone-300 mt-2">The ES module failed to load (common when opening <code>file://</code> directly). Attempting file:// compatible bundle.</p>'
+        + detail
+        + '<div class="flex gap-3 mt-4">'
+        + '<button onclick="window.__loadBundleFallback()" class="px-4 py-2.5 rounded-xl bg-gold text-obsidian font-bold hover:bg-amber-300">Load Fallback Bundle</button>'
+        + '<button onclick="location.reload()" class="px-4 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-white font-semibold border border-white/10">Reload</button>'
+        + '</div>'
+        + '<p class="text-xs text-stone-500 mt-3">Tip: Run via a local server for full ES modules: <code class="bg-white/10 px-1.5 py-0.5 rounded">python -m http.server</code> then open <code class="bg-white/10 px-1.5 py-0.5 rounded">http://localhost:8000</code></p>'
+        + '</div>';
+    }
+    function escapeHtml(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+    window.__loadBundleFallback = function() {
+      if (window.__AVALON_BUNDLE_LOADED__) return;
+      window.__AVALON_BUNDLE_LOADED__ = true;
+      var s = document.createElement('script');
+      s.src = 'js/bundle.js';
+      s.onload = function(){ console.log('[Avalon] bundle loaded via fallback'); };
+      s.onerror = function(){ 
+        var el = document.getElementById('loading') || document.getElementById('app');
+        if(el) el.innerHTML = '<div class="rounded-2xl bg-evil/10 border border-evil/30 p-6 text-center"><p class="text-evil font-bold">Fallback also failed</p><p class="text-sm text-stone-400 mt-1">Check that js/bundle.js exists and refresh.</p></div>';
+      };
+      document.head.appendChild(s);
+    };
+    // Auto-detect file:// — ES modules are blocked in Chrome/Edge when opened via file://
+    // Immediately use bundle for file://, no need to wait for failure
+    if (location.protocol === 'file:') {
+      // Defer to allow DOM to be parsed
+      document.addEventListener('DOMContentLoaded', function() {
+        if (!window.__AVALON_BOOTED__) {
+          console.warn('[Avalon] file:// detected — loading bundle directly');
+          window.__loadBundleFallback();
+        }
+      });
+    }
+  </script>
+</head>
+<body class="bg-[#0a1e2e] text-stone-200 font-sans min-h-screen antialiased selection:bg-gold/30 selection:text-white">
+  <!-- Exact Table Party background — solid dark, no amber gradients -->
+  <div class="fixed inset-0 pointer-events-none overflow-hidden" aria-hidden="true">
+    <div class="absolute inset-0 opacity-[0.015]" style="background-image: radial-gradient(circle at 1px 1px, white 1px, transparent 0); background-size: 40px 40px;"></div>
+  </div>
+  <!-- Header -->
+  <header class="relative z-20 sticky top-0 backdrop-blur-xl bg-obsidian/80 border-b border-white/[0.06]">
+    <div class="max-w-[1440px] mx-auto px-4 sm:px-6 lg:px-8">
+      <div class="flex items-center justify-between h-[64px] gap-4">
+        <div class="flex items-center gap-3 sm:gap-4">
+          <div class="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-br from-gold to-amber-600 flex items-center justify-center shadow-lg shadow-gold/20 shrink-0">
+            <span class="font-display font-extrabold text-obsidian text-[18px] sm:text-[20px] leading-none">A</span>
+          </div>
+          <div class="min-w-0">
+            <h1 class="font-display font-extrabold text-[16px] sm:text-[18px] leading-none tracking-[0.12em] text-white">AVALON</h1>
+            <p class="text-[11px] sm:text-[12px] tracking-[0.18em] text-stone-400 font-medium -mt-0.5">QUEST OF SHADOWS</p>
+          </div>
+        </div>
+        <div class="flex items-center gap-2 sm:gap-3">
+          <button id="btn-rules" class="hidden sm:inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-white/[0.06] hover:bg-white/[0.10] border border-white/[0.08] text-sm font-medium transition-colors">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg>
+            Rules
+          </button>
+          <button id="btn-reset" class="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-white/[0.06] hover:bg-white/[0.10] border border-white/[0.08] text-sm font-medium transition-colors">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
+            <span class="hidden sm:inline">New Game</span><span class="sm:hidden">New</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- App root -->
+  <main id="app" class="relative z-10 max-w-[1440px] mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
+    <!-- Rendered by js/app.js (ES modules) or js/bundle.js (file:// fallback) -->
+    <div id="loading" class="flex flex-col items-center justify-center py-24 gap-4">
+      <div class="w-10 h-10 border-2 border-white/20 border-t-gold rounded-full animate-spin"></div>
+      <p class="text-sm text-stone-400 font-medium tracking-wide">Forging the realm…</p>
+      <p class="text-xs text-stone-600">If this sticks, check console (F12) for errors</p>
+    </div>
+  </main>
+
+  <!-- Modal portal (secure overlays rendered here, removed on hide to prevent leakage) -->
+  <div id="modal-root" class="relative z-50"></div>
+
+  <!-- Toast container -->
+  <div id="toast-root" class="fixed bottom-4 left-1/2 -translate-x-1/2 z-[60] flex flex-col gap-2 pointer-events-none max-w-[90vw]"></div>
+
+  <!-- Rules modal (static, hidden by default) -->
+  <dialog id="rules-dialog" class="p-0 bg-transparent backdrop:bg-obsidian/80 backdrop:backdrop-blur-sm open:animate-[slideUp_0.25s_ease-out] max-w-[640px] w-[calc(100%-2rem)] rounded-2xl overflow-hidden">
+    <div class="bg-[#111827] border border-white/10 rounded-2xl overflow-hidden shadow-2xl">
+      <div class="px-6 py-5 border-b border-white/10 flex items-center justify-between">
+        <h2 class="font-display font-bold text-lg tracking-wide text-white">How to Play</h2>
+        <button onclick="this.closest('dialog').close()" class="w-8 h-8 rounded-lg bg-white/10 hover:bg-white/20 flex items-center justify-center transition-colors" aria-label="Close">✕</button>
+      </div>
+      <div class="px-6 py-5 space-y-4 text-sm leading-relaxed text-stone-300 max-h-[70vh] overflow-auto">
+        <p><span class="text-white font-semibold">Goal:</span> Good (Loyal Servants + Merlin) need 3 successful quests. Evil (Minions + Assassin) need 3 failed quests, or 5 rejected team proposals, or assassinate Merlin if Good wins.</p>
+        <div class="grid grid-cols-2 gap-3">
+          <div class="rounded-xl bg-good/10 border border-good/20 p-3">
+            <p class="font-semibold text-good text-xs tracking-widest">GOOD</p>
+            <p class="mt-1 text-stone-300">Loyal Servant, Merlin (sees Evil)</p>
+          </div>
+          <div class="rounded-xl bg-evil/10 border border-evil/20 p-3">
+            <p class="font-semibold text-evil text-xs tracking-widest">EVIL</p>
+            <p class="mt-1 text-stone-300">Minion, Assassin (kills Merlin)</p>
+          </div>
+        </div>
+        <ol class="list-decimal list-inside space-y-1.5 text-stone-300">
+          <li><span class="text-white font-medium">Role Discovery</span> — pass device, each player secretly views role.</li>
+          <li><span class="text-white font-medium">Team Proposal</span> — Leader picks team (size per quest track).</li>
+          <li><span class="text-white font-medium">Team Vote</span> — all vote Approve/Reject simultaneously. Majority approves → quest. Tie or majority reject → next Leader, tracker +1.</li>
+          <li><span class="text-white font-medium">Quest</span> — team members secretly play Success/Fail. Good must play Success. 1 Fail fails quest (Quest 4 with 7+ needs 2).</li>
+          <li><span class="text-white font-medium">Assassination</span> — if Good gets 3 quests, Assassin guesses Merlin. Correct → Evil wins.</li>
+        </ol>
+        <p class="text-xs text-stone-500">Quest sizes: 5p [2,3,2,3,3] • 6p [2,3,4,3,4] • 7p [2,3,3,4*,4] • 8-10p [3,4,4,5*,5] — * needs 2 fails.</p>
+      </div>
+    </div>
+  </dialog>
+
+  <noscript>
+    <div class="fixed inset-0 z-50 bg-obsidian flex items-center justify-center p-6 text-center">
+      <p class="text-white font-medium">This realm requires JavaScript. Please enable it to play Avalon.</p>
+    </div>
+  </noscript>
+
+  <!-- Boot: ES modules (http) with file:// fallback to bundle.js -->
+  <script type="module" src="js/app.js"></script>
+  <script>
+    // Secondary fallback: if after 2.8s still on loading and no boot flag, load bundle
+    // Covers browsers that silently fail modules without firing error (Safari file://)
+    setTimeout(function(){
+      if (!window.__AVALON_BOOTED__ && document.getElementById('loading')) {
+        var errs = window.__AVALON_ERRORS__;
+        if (location.protocol !== 'file:' && errs.length === 0) {
+          // Maybe just slow network — give extra 2s, but show hint
+          console.warn('[Avalon] still loading after 2.8s, waiting…');
+          setTimeout(function(){
+            if (!window.__AVALON_BOOTED__ && document.getElementById('loading')) {
+              console.warn('[Avalon] forcing bundle fallback after extended wait');
+              window.__loadBundleFallback();
+            }
+          }, 2000);
+        } else {
+          // Either file:// or we have errors — fallback now
+          if (!window.__AVALON_BUNDLE_LOADED__) {
+            console.warn('[Avalon] fallback triggered by timeout');
+            window.__loadBundleFallback();
+          }
+        }
+      }
+    }, 2800);
+    // Hook module load error at window level for <script type="module">
+    window.addEventListener('error', function(e){
+      var target = e.target;
+      if (target && target.tagName === 'SCRIPT' && target.type === 'module') {
+        console.error('[Avalon] module script failed to load', target.src);
+        window.__loadBundleFallback();
+      }
+    }, true);
+  </script>
+</body>
+</html>
