@@ -152,23 +152,27 @@ export function renderLobby(ctx) {
   const players = ctx.playersDraft || [];
   const extra = ctx.extraRoles || {};
   const myName = ctx.myName || players[0]?.name || 'YOU';
+  const isJoiner = !!ctx.isJoiner;
+  const joinedName = ctx.joinedName || myName;
   const need = Math.max(0, 5 - players.length);
-  const canStart = players.length >= 5 && players.length <= 10;
+  const canStart = !isJoiner && players.length >= 5 && players.length <= 10;
   const inviteLink = ctx.inviteLink || '';
 
   // Avatar bubbles — show up to 10, with YOU badge on first human, plus dashed waiting slots
   const maxShow = 10;
   const avatars = players.map((p, i) => {
-    const isYou = i === 0;
+    const isYou = isJoiner ? p.name===joinedName : i===0;
     const color = isYou ? 'border-emerald-400' : 'border-white/15';
     const bg = isYou ? 'bg-gradient-to-br from-amber-200 to-orange-100' : 'bg-gradient-to-br from-slate-600 to-slate-700';
     const botBadge = p.isBot ? '<span class="absolute -bottom-1 -right-1 px-1 py-0 rounded-full bg-white/90 text-[8px] font-extrabold text-obsidian border border-white">BOT</span>' : '';
     const youBadge = isYou ? '<span class="absolute -bottom-2 left-1/2 -translate-x-1/2 px-2 py-0.5 rounded-full bg-white text-obsidian text-[9px] font-extrabold tracking-widest">YOU</span>' : '';
-    const canKick = players.length > 1;
+    const canKick = !isJoiner && players.length > 1;
+    const canEdit = isJoiner ? p.name===joinedName : (p.isBot || i===0);
+    const editAttr = canEdit ? `data-edit-idx="${i}"` : '';
     const kickBtn = canKick ? `<button data-kick-idx="${i}" class="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-black/70 hover:bg-evil border border-white/20 flex items-center justify-center text-white text-[9px] leading-none opacity-90 hover:opacity-100 transition-opacity" title="Kick">✕</button>` : '';
     return `
       <div class="flex flex-col items-center gap-1.5 relative group">
-        <div data-edit-idx="${i}" class="relative w-[56px] h-[56px] sm:w-[60px] sm:h-[60px] rounded-full border-2 ${color} ${bg} flex items-center justify-center text-lg font-extrabold text-white shadow-md cursor-pointer hover:scale-105 transition-transform">
+        <div ${editAttr} class="relative w-[56px] h-[56px] sm:w-[60px] sm:h-[60px] rounded-full border-2 ${color} ${bg} flex items-center justify-center text-lg font-extrabold text-white shadow-md ${canEdit?'cursor-pointer hover:scale-105':'cursor-default'} transition-transform">
           ${p.name ? escape(p.name[0].toUpperCase()) : '?'}
           ${botBadge}
           ${kickBtn}
@@ -193,10 +197,12 @@ export function renderLobby(ctx) {
   // Extra roles toggles
   const roleButtons = EXTRA_ROLES.map(r => {
     const active = !!extra[r.key];
-    const bg = active ? 'bg-[#3aa8d6] border-[#3aa8d6] text-white' : 'bg-white/[0.06] border-white/15 text-stone-300 hover:bg-white/10';
+    const bg = active ? 'bg-[#3aa8d6] border-[#3aa8d6] text-white' : 'bg-white/[0.06] border-white/15 text-stone-300' + (isJoiner ? '' : ' hover:bg-white/10');
     const sideColor = r.side === 'GOOD' ? 'text-cyan-200' : 'text-rose-200';
+    const extraAttr = isJoiner ? '' : `data-extra="${r.key}"`;
+    const disabled = isJoiner ? 'disabled opacity-60 cursor-not-allowed' : '';
     return `
-      <button data-extra="${r.key}" class="text-left rounded-full px-3.5 py-2.5 border flex flex-col leading-none ${bg} transition-colors">
+      <button ${extraAttr} ${disabled} class="text-left rounded-full px-3.5 py-2.5 border flex flex-col leading-none ${bg} transition-colors">
         <span class="text-[13px] font-extrabold tracking-wide ${active ? 'text-white' : 'text-white'}">${r.label}</span>
         <span class="text-[10px] font-bold tracking-[0.14em] ${active ? 'text-white/80' : sideColor}">${r.side}</span>
       </button>
@@ -204,7 +210,7 @@ export function renderLobby(ctx) {
   }).join('');
 
   // Bottom bar text
-  const bottomText = need > 0 ? `Needs ${need} more player${need!==1?'s':''}` : (players.length>10 ? 'Too many players' : 'Ready to quest!');
+  const bottomText = isJoiner ? `Waiting for host to start` : (need > 0 ? `Needs ${need} more player${need!==1?'s':''}` : (players.length>10 ? 'Too many players' : 'Ready to quest!'));
 
   return `
     <div class="max-w-[480px] mx-auto px-4 sm:px-0">
@@ -240,13 +246,19 @@ export function renderLobby(ctx) {
         ${waiting}
       </div>
 
-      <!-- Add Bot (host) -->
-      <div class="mt-3 flex gap-2">
-        <input id="input-add-player" maxlength="16" placeholder="Bot name"
-          class="flex-1 px-3.5 py-2.5 rounded-xl bg-white/10 border border-white/15 text-white placeholder:text-white/40 text-sm font-medium outline-none focus:border-[#3aa8d6] focus:bg-white/15" />
-        <button id="btn-add-bot" class="px-4 py-2.5 rounded-xl bg-[#f3ecd8] hover:bg-white text-[#0e2533] text-sm font-bold">Add Bot</button>
-      </div>
-      <p class="text-xs text-white/40 mt-1.5 text-center">Tap avatar to edit or kick • Add up to 10 • Works on each player's own device</p>
+      ${isJoiner ? `
+        <div class="mt-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 p-3 text-center">
+          <p class="text-sm font-bold text-emerald-300">You’re in — waiting for host</p>
+          <p class="text-xs text-white/50 mt-1">Host will start when 5+ are ready. Tap your avatar to change your name.</p>
+        </div>
+      ` : `
+        <div class="mt-3 flex gap-2">
+          <input id="input-add-player" maxlength="16" placeholder="Bot name"
+            class="flex-1 px-3.5 py-2.5 rounded-xl bg-white/10 border border-white/15 text-white placeholder:text-white/40 text-sm font-medium outline-none focus:border-[#3aa8d6] focus:bg-white/15" />
+          <button id="btn-add-bot" class="px-4 py-2.5 rounded-xl bg-[#f3ecd8] hover:bg-white text-[#0e2533] text-sm font-bold">Add Bot</button>
+        </div>
+        <p class="text-xs text-white/40 mt-1.5 text-center">Tap avatar to edit or kick • Add up to 10 • Works on each player's own device</p>
+      `}
 
       <!-- Game options — collapsible -->
       <div class="mt-4 rounded-2xl bg-[#0e2231]/80 border border-white/10 backdrop-blur p-4 shadow-xl">
@@ -585,6 +597,10 @@ export function renderGamePopup() {
             <p class="font-black text-white text-sm">Deduction</p>
             <p class="text-[10px] tracking-widest font-bold text-white/40">TYPE</p>
           </div>
+        </div>
+        <div class="mt-4">
+          <input id="popup-host-name" maxlength="16" placeholder="Your name (host)" class="w-full px-3.5 py-3 rounded-xl bg-white/10 border border-white/20 text-white placeholder:text-white/40 text-sm font-medium outline-none focus:border-[#7ec8e6] text-center" />
+          <p class="text-xs text-white/30 mt-1">You can change this and add bots in the lobby</p>
         </div>
         <button id="btn-popup-play" class="mt-4 w-full py-3.5 rounded-full bg-gradient-to-b from-[#a0d8f0] to-[#7ec8e6] hover:from-[#b0e0f5] hover:to-[#8ed0ea] text-[#0a1e2e] font-black tracking-wide shadow-lg">Play now</button>
         <button id="btn-popup-howto" class="mt-3 w-full flex items-center justify-between px-4 py-3 rounded-2xl bg-white/[0.06] hover:bg-white/[0.08] border border-white/10 text-left">

@@ -393,32 +393,17 @@ function buildLayout(pub){
       const joinedName = (()=>{ try{ return localStorage.getItem('avalon:myName:'+lobbyDraft.roomCode) || ''; }catch(_){return ''}})();
       const isAlreadyJoined = hasJoined || (joinedName && hostPlayers.some(p=> p.name===joinedName));
       if (isAlreadyJoined) {
-        return `
-        <div class="max-w-[480px] mx-auto px-4 sm:px-0">
-          <div class="flex items-center justify-between pt-2">
-            <button id="btn-join-back" class="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center text-white/70">‹</button>
-            <div class="text-center">
-              <h1 class="font-display font-extrabold text-[18px] text-[#f0e8d0]">Quest of Shadows</h1>
-              <p class="text-xs text-white/60">Joined ${escape(lobbyDraft.roomCode)} ✓</p>
-            </div>
-            <div class="w-8"></div>
-          </div>
-          <div class="mt-5 rounded-[24px] bg-[#29546c] border border-white/10 p-6 text-center">
-            <p class="text-xs tracking-widest font-bold text-white/60">ROOM</p>
-            <div class="font-display font-black text-[36px] tracking-[0.18em] text-[#f3ecd8]">${escape(lobbyDraft.roomCode)}</div>
-            <p class="text-xs text-emerald-200 mt-1">You are in — waiting for host to start</p>
-            <div class="mt-3 flex flex-wrap justify-center gap-1.5">
-              ${hostPlayers.map(p=> `<span class="px-2.5 py-1 rounded-full ${p.name===joinedName?'bg-emerald-500 text-white':'bg-white/15 text-white'} text-xs font-bold">${escape(p.name)}${p.name===joinedName?' · YOU':''}${p.isBot?' · BOT':''}</span>`).join('')}
-            </div>
-          </div>
-          <div class="mt-6 rounded-2xl bg-[#0e2231]/80 border border-white/10 p-5 text-center">
-            <div class="w-10 h-10 mx-auto rounded-full bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center">✓</div>
-            <h3 class="font-extrabold text-white text-sm mt-3">You’ve joined — hang tight</h3>
-            <p class="text-xs text-white/50 mt-1">Host will start when 5+ are ready. You’ll jump straight to your secret role.</p>
-            <p class="text-xs text-white/30 mt-3">Joined as <span class="text-white font-bold">${escape(joinedName)}</span> • ${count} in lobby</p>
-          </div>
-        </div>
-        `;
+        // Joiner sees same lobby as host but limited (can only edit own name)
+        const ctx = {
+          roomCode: lobbyDraft.roomCode,
+          playersDraft: hostPlayers.map(p=> ({name:p.name, isBot:p.isBot})),
+          extraRoles: pub.extraRoles && Object.keys(pub.extraRoles).length ? pub.extraRoles : lobbyDraft.extraRoles,
+          myName: joinedName,
+          inviteLink: net.generateInviteLink(lobbyDraft.roomCode),
+          isJoiner: true,
+          joinedName: joinedName,
+        };
+        return renderLobby(ctx);
       }
       return `
         <div class="max-w-[480px] mx-auto px-4 sm:px-0">
@@ -1136,13 +1121,18 @@ function bindDynamicEvents(pub){
       if (e.target.id==='game-popup-overlay') { showGamePopup=false; queueRender(); }
     });
     document.getElementById('btn-popup-play')?.addEventListener('click', async ()=>{
+      const hostNameInput=document.getElementById('popup-host-name');
+      let hostName=(hostNameInput?.value||'').trim() || 'Lucky';
+      if (hostName.length>16) hostName=hostName.slice(0,16);
+      if (!hostName) hostName='Lucky';
       const newCode = generateRoomCode();
       persistLobbyCode(newCode);
-      lobbyDraft = { roomCode: newCode, players: [{ name: 'Lucky', isBot: false }], extraRoles: { percival: true, morgana: true, mordred: false, oberon: false } };
+      lobbyDraft = { roomCode: newCode, players: [{ name: hostName, isBot: false }], extraRoles: { percival: true, morgana: true, mordred: false, oberon: false } };
       saveLobbyDraft();
       try { await syncLobbyToServer(); } catch(_){}
+      history.replaceState(null,'', window.location.pathname + '?room=' + newCode);
       uiMode='LOBBY'; showGamePopup=false; queueRender();
-      toast('Room ' + newCode + ' created','success');
+      toast('Room ' + newCode + ' created as ' + hostName,'success');
     });
     document.getElementById('btn-popup-howto')?.addEventListener('click', ()=>{
       showGamePopup=false; queueRender();
