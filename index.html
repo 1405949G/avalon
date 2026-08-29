@@ -192,25 +192,27 @@
         <button onclick="this.closest('dialog').close()" class="w-8 h-8 rounded-lg bg-white/10 hover:bg-white/20 flex items-center justify-center transition-colors" aria-label="Close">✕</button>
       </div>
       <div class="px-6 py-5 space-y-4 text-sm leading-relaxed text-stone-300 max-h-[70vh] overflow-auto">
-        <p><span class="text-white font-semibold">Goal:</span> Good (Loyal Servants + Merlin) need 3 successful quests. Evil (Minions + Assassin) need 3 failed quests, or 5 rejected team proposals, or assassinate Merlin if Good wins.</p>
+        <p><span class="text-white font-semibold">Goal:</span> Good (Loyal Servants + Merlin) need 3 successful quests. Evil (Minions + Assassin) need 3 failed quests, or 5 rejected team proposals, or assassinate Merlin if Good wins. <span class="text-white/60">No phone passing — each player joins on their own phone via invite link. Roles stay private on your device.</span></p>
         <div class="grid grid-cols-2 gap-3">
           <div class="rounded-xl bg-good/10 border border-good/20 p-3">
             <p class="font-semibold text-good text-xs tracking-widest">GOOD</p>
-            <p class="mt-1 text-stone-300">Loyal Servant, Merlin (sees Evil)</p>
+            <p class="mt-1 text-stone-300">Loyal Servant, Merlin (sees Evil), Percival (sees Merlin)</p>
           </div>
           <div class="rounded-xl bg-evil/10 border border-evil/20 p-3">
             <p class="font-semibold text-evil text-xs tracking-widest">EVIL</p>
-            <p class="mt-1 text-stone-300">Minion, Assassin (kills Merlin)</p>
+            <p class="mt-1 text-stone-300">Minion, Assassin, Morgana (fools Percival), Mordred (hidden), Oberon (isolated)</p>
           </div>
         </div>
         <ol class="list-decimal list-inside space-y-1.5 text-stone-300">
-          <li><span class="text-white font-medium">Role Discovery</span> — pass device, each player secretly views role.</li>
-          <li><span class="text-white font-medium">Team Proposal</span> — Leader picks team (size per quest track).</li>
-          <li><span class="text-white font-medium">Team Vote</span> — all vote Approve/Reject simultaneously. Majority approves → quest. Tie or majority reject → next Leader, tracker +1.</li>
-          <li><span class="text-white font-medium">Quest</span> — team members secretly play Success/Fail. Good must play Success. 1 Fail fails quest (Quest 4 with 7+ needs 2).</li>
-          <li><span class="text-white font-medium">Assassination</span> — if Good gets 3 quests, Assassin guesses Merlin. Correct → Evil wins.</li>
+          <li><span class="text-white font-medium">Join</span> — Host taps <span class="text-white">Play now</span> (new 4-letter code) and shares link. Friends open link or tap <span class="text-white">Join a friend’s game</span> and enter code. Add bots to reach 5–10.</li>
+          <li><span class="text-white font-medium">Roles</span> — Each phone shows <span class="text-white">YOUR ALLEGIANCE</span> privately. Tap <span class="text-white">I know my part</span> when ready. No passing — your role never leaves your device. <span class="text-white/60">Merlin sees Evil (except Mordred), Evil knows each other (except Oberon), Percival sees Merlin/Morgana.</span></li>
+          <li><span class="text-white font-medium">Team Proposal</span> — Leader picks team (size per quest track circles <span class="text-white">2 3 2 3 3</span>). Visible to all, timer view-only.</li>
+          <li><span class="text-white font-medium">Team Vote</span> — All on their phones tap <span class="text-white">Approve/Reject</span> simultaneously. Majority approves → quest. Tie or reject → next leader, ✕ tracker +1. Five rejects → Evil wins.</li>
+          <li><span class="text-white font-medium">Quest</span> — Team members on their phones tap <span class="text-white">Succeed</span> (Good must) or <span class="text-white">Fail</span> (Evil may). 1 Fail fails quest — Quest 4 with 7+ needs 2.</li>
+          <li><span class="text-white font-medium">Assassination</span> — If Good gets 3 quests, Assassin (on their phone) names Merlin. Correct → Evil steals win.</li>
         </ol>
-        <p class="text-xs text-stone-500">Quest sizes: 5p [2,3,2,3,3] • 6p [2,3,4,3,4] • 7p [2,3,3,4*,4] • 8-10p [3,4,4,5*,5] — * needs 2 fails.</p>
+        <p class="text-xs text-stone-500">Quest sizes: 5p [2,3,2,3,3] • 6p [2,3,4,3,4] • 7p [2,3,3,4*,4] • 8-10p [3,4,4,5*,5] — * needs 2 fails. Tracker resets after each quest.</p>
+        <p class="text-xs text-amber-200/70">Tip: Invite link is <code class="bg-white/10 px-1 py-0.5 rounded">?room=EQKH</code> — each player’s role/votes are per-device, never leaked to others or logs.</p>
       </div>
     </div>
   </dialog>

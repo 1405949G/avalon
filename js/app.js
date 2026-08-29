@@ -9,7 +9,7 @@ import * as storage from './storage.js';
 import * as net from './net.js';
 import * as ai from './ai.js';
 import { renderLog } from './ui/log.js';
-import { renderQuestTrack, renderProposalTracker, renderTimer, renderPlayerGrid, renderLobby, renderPrivateRole, renderRoleReveal, renderExactHeader, renderExactQuestTrack, renderExactAllegiance, renderExactTableSummary, renderExactAvatarRow, renderExactBottomButton } from './ui/components.js';
+import { renderQuestTrack, renderProposalTracker, renderTimer, renderPlayerGrid, renderLobby, renderPrivateRole, renderRoleReveal, renderExactHeader, renderExactQuestTrack, renderExactAllegiance, renderExactTableSummary, renderExactAvatarRow, renderExactBottomButton, renderHome, renderGamePopup, renderJoinCodeScreen } from './ui/components.js';
 import { showRoleReveal, showQuestVote, showConfirm } from './ui/modals.js';
 
 try { window.__AVALON_BOOTED__ = true; } catch(_) {}
@@ -27,6 +27,10 @@ let lobbyRoomCache = null; // for joiner view
 let lobbyPoll = null;
 let isJoinerMode = false;
 let hasJoined = false; // joiner has already called joinRoom — show waiting not input
+let uiMode = 'HOME'; // HOME, JOIN_CODE, LOBBY
+let showGamePopup = false;
+let homeSearch = '';
+let joinCodeInput = '';
 
 function defaultLobby() {
   // Persist room code — don't generate new on every refresh
@@ -316,12 +320,15 @@ function render(){
   const app=document.getElementById('app'); if(!app) return;
   const loading=document.getElementById('loading'); if(loading) loading.remove();
   const pub=getPublicState(state);
-  // Toggle header / background for exact Table Party in-game look
+  // Toggle header / background — hide AVALON header for HOME/JOIN_CODE (they have own Table Party header) and for in-game
+  const isHomeLike = pub.phase===PHASES.LOBBY && (uiMode==='HOME' || uiMode==='JOIN_CODE') && !isJoinerMode;
   const headerEl = document.querySelector('header');
-  if (headerEl) headerEl.style.display = (pub.phase===PHASES.LOBBY) ? '' : 'none';
-  if (pub.phase===PHASES.LOBBY) {
+  if (headerEl) headerEl.style.display = (pub.phase===PHASES.LOBBY && !isHomeLike) ? '' : 'none';
+  if (pub.phase===PHASES.LOBBY && !isHomeLike) {
     document.body.className = document.body.className.replace('bg-[#0a1e2e]','').replace('bg-obsidian','bg-obsidian');
     document.body.style.backgroundColor = '';
+  } else if (isHomeLike) {
+    document.body.style.backgroundColor = '#0f0a1a';
   } else {
     document.body.style.backgroundColor = '#0a1e2e';
   }
@@ -334,6 +341,15 @@ function render(){
 
 function buildLayout(pub){
   if (pub.phase===PHASES.LOBBY) {
+    // — HOME / JOIN CODE takes precedence when not yet in a real lobby flow —
+    if (uiMode === 'JOIN_CODE') {
+      return renderJoinCodeScreen(joinCodeInput);
+    }
+    if (uiMode === 'HOME' && !isJoinerMode) {
+      let html = renderHome(homeSearch);
+      if (showGamePopup) html += renderGamePopup();
+      return html;
+    }
     const inviteLink = pub.roomCode ? net.generateInviteLink(pub.roomCode) : (lobbyDraft.inviteLink || (window.location.origin + window.location.pathname + '?room=' + lobbyDraft.roomCode));
     // Joiner mode: show join screen with host's players from cache
     if (isJoinerMode && lobbyRoomCache && lobbyRoomCache.players) {
@@ -1053,6 +1069,88 @@ function renderGameOver(pub){
 }
 
 function bindDynamicEvents(pub){
+  // — HOME (Pick a game) and JOIN_CODE intercept — must be before lobby bindings —
+  if (pub.phase===PHASES.LOBBY && uiMode==='HOME' && !isJoinerMode) {
+    document.getElementById('input-home-search')?.addEventListener('input', (e)=>{
+      homeSearch = e.target.value;
+      // live filter without full re-render to keep focus
+      const q = homeSearch.toLowerCase().trim();
+      document.querySelectorAll('[data-game-id]').forEach(card=>{
+        const title = card.dataset.gameId || '';
+        const text = card.textContent.toLowerCase();
+        const show = !q || text.includes(q) || title.includes(q);
+        card.style.display = show ? '' : 'none';
+      });
+      const countEl = document.querySelector('#home-games-count');
+      if (countEl) {
+        const visible = Array.from(document.querySelectorAll('[data-game-id]')).filter(c=> c.style.display!=='none').length;
+        countEl.textContent = visible + ' games';
+      }
+    });
+    document.getElementById('btn-home-join-banner')?.addEventListener('click', ()=>{
+      uiMode='JOIN_CODE'; joinCodeInput=''; queueRender();
+    });
+    document.querySelectorAll('[data-game-id]')?.forEach(el=>{
+      el.addEventListener('click', ()=>{
+        if (el.dataset.gameId==='quest-of-shadows') { showGamePopup=true; queueRender(); }
+        else toast('Coming soon','default');
+      });
+    });
+    document.getElementById('btn-popup-close')?.addEventListener('click', ()=>{ showGamePopup=false; queueRender(); });
+    document.getElementById('game-popup-overlay')?.addEventListener('click', (e)=>{
+      if (e.target.id==='game-popup-overlay') { showGamePopup=false; queueRender(); }
+    });
+    document.getElementById('btn-popup-play')?.addEventListener('click', async ()=>{
+      const newCode = generateRoomCode();
+      persistLobbyCode(newCode);
+      lobbyDraft = { roomCode: newCode, players: [{ name: 'Lucky', isBot: false }], extraRoles: { percival: true, morgana: true, mordred: false, oberon: false } };
+      saveLobbyDraft();
+      try { await syncLobbyToServer(); } catch(_){}
+      uiMode='LOBBY'; showGamePopup=false; queueRender();
+      toast('Room ' + newCode + ' created','success');
+    });
+    document.getElementById('btn-popup-howto')?.addEventListener('click', ()=>{
+      showGamePopup=false; queueRender();
+      document.getElementById('rules-dialog')?.showModal();
+    });
+    document.getElementById('btn-popup-join')?.addEventListener('click', ()=>{
+      showGamePopup=false; uiMode='JOIN_CODE'; joinCodeInput=''; queueRender();
+    });
+    return;
+  }
+  if (pub.phase===PHASES.LOBBY && uiMode==='JOIN_CODE') {
+    const inp = document.getElementById('input-join-code');
+    const btn = document.getElementById('btn-join-enter');
+    const err = document.getElementById('join-code-error');
+    const disp = document.getElementById('join-code-display');
+    inp?.addEventListener('input', (e)=>{
+      let v = e.target.value.toUpperCase().replace(/[^A-Z]/g,'').slice(0,4);
+      joinCodeInput = v;
+      e.target.value = v;
+      if (disp) {
+        disp.innerHTML = v ? v.split('').map(ch=> `<span>${escape(ch)}</span>`).join('<span class="w-1"></span>') : '<span class="text-white/20 tracking-[0.6em]">----</span>';
+      }
+      if (btn) btn.disabled = v.length!==4;
+      if (err) err.textContent = '';
+    });
+    inp?.addEventListener('keydown', (e)=>{
+      if (e.key==='Enter' && joinCodeInput.length===4) {
+        e.preventDefault();
+        window.location.href = window.location.pathname + '?room=' + joinCodeInput;
+      }
+    });
+    // auto-focus
+    setTimeout(()=> inp?.focus(), 50);
+    document.getElementById('btn-join-back')?.addEventListener('click', ()=>{
+      uiMode='HOME'; joinCodeInput=''; queueRender();
+    });
+    btn?.addEventListener('click', ()=>{
+      const code = joinCodeInput.trim().toUpperCase();
+      if (!isValidRoomCode(code)) { if (err) err.textContent='Enter 4 letters A-Z'; return; }
+      window.location.href = window.location.pathname + '?room=' + code;
+    });
+    return;
+  }
   // Lobby Table Party events
   if (pub.phase===PHASES.LOBBY) {
     document.getElementById('btn-share-link')?.addEventListener('click', async (e)=>{
@@ -1129,9 +1227,9 @@ function bindDynamicEvents(pub){
       const p=document.getElementById('panel-extra-roles');
       if(p) p.classList.toggle('hidden');
     });
-    document.getElementById('btn-lobby-back')?.addEventListener('click', ()=>{ toast('Back', 'default'); });
+    document.getElementById('btn-lobby-back')?.addEventListener('click', ()=>{ uiMode='HOME'; showGamePopup=false; queueRender(); });
     document.getElementById('btn-lobby-help')?.addEventListener('click', ()=>{ document.getElementById('rules-dialog')?.showModal(); });
-    document.getElementById('btn-change-game')?.addEventListener('click', ()=>{ toast('Quest of Shadows — more games soon', 'default'); });
+    document.getElementById('btn-change-game')?.addEventListener('click', ()=>{ uiMode='HOME'; showGamePopup=false; queueRender(); });
 
     document.getElementById('btn-start')?.addEventListener('click', async ()=>{
       try {
@@ -1471,6 +1569,9 @@ async function init(){
     }
   }
   isJoinerMode = isJoiner;
+  // Determine uiMode — HOME when no invite, LOBBY when invite present or already in lobby
+  if (inviteCode) uiMode = 'LOBBY';
+  else uiMode = 'HOME';
   // Determine if joiner already joined (for waiting screen)
   if (isJoiner) {
     try {
@@ -1478,8 +1579,8 @@ async function init(){
       if (myName && lobbyRoomCache && lobbyRoomCache.players && lobbyRoomCache.players.some(p=>p.name===myName)) hasJoined = true;
     } catch(_){}
   }
-  // If host (not joiner) and in lobby, sync lobby to server so joiners can find it — await so joiner sees it
-  if (!isJoiner && lobbyDraft.roomCode) {
+  // If host (not joiner) and in lobby mode, sync lobby to server so joiners can find it — await so joiner sees it
+  if (!isJoiner && lobbyDraft.roomCode && uiMode==='LOBBY') {
     try { await syncLobbyToServer(); } catch(_){}
     startLobbyPoll();
   } else if (isJoiner) {

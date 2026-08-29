@@ -513,3 +513,130 @@ export function renderExactBottomButton(text, id, opts={}) {
   const disabled = opts.disabled ? 'disabled opacity-50 cursor-not-allowed' : '';
   return `<button id="${id}" ${disabled} class="${cls} transition-colors">${escape(text)}</button>`;
 }
+
+// ——— TABLE PARTY HOME (Pick a game) ———
+export const HOME_GAMES = [
+  { id:'quest-of-shadows', title:'Quest of Shadows', subtitle:'Good outnumbers evil, but evil knows...', desc:'Good outnumbers evil, but evil knows exactly who everyone is. Merlin knows too — and has to spend the whole game making sure nobody works out that he does.', inspired:'Inspired by The Resistance: Avalon', icon:'🗡️', iconBg:'bg-[#2a4a5a]', players:'5-10', time:'15-25', type:'Deduction', enabled:true },
+  { id:'fake-answers', title:'Fake Answers', subtitle:'Inspired by Psych!', players:'3-12', time:'10 min', icon:'🔥', iconBg:'bg-[#3a2a1a]', enabled:false },
+  { id:'boggle', title:'Boggle', subtitle:'Shake. Hunt. Don\'t match.', players:'1-12', time:'10 min', icon:'🎲', iconBg:'bg-[#2a3a1a]', enabled:false },
+  { id:'quip', title:'Quip Battle', subtitle:'Inspired by Quiplash', players:'3-12', time:'15 min', icon:'💬', iconBg:'bg-[#1a3a4a]', enabled:false },
+];
+
+export function renderHome(searchQuery='') {
+  const q = (searchQuery||'').toLowerCase().trim();
+  const filtered = !q ? HOME_GAMES : HOME_GAMES.filter(g=> g.title.toLowerCase().includes(q) || g.subtitle.toLowerCase().includes(q));
+  const gamesCount = filtered.length;
+  return `
+    <div class="min-h-screen bg-[#0f0a1a] -mx-4 sm:-mx-6 lg:-mx-8 -mt-6 sm:-mt-8">
+      <div class="max-w-[1200px] mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
+        <!-- TableParty header -->
+        <div class="text-center pt-2">
+          <p class="font-display font-bold text-xs tracking-[0.18em] text-white/60">Table Party</p>
+          <h1 class="font-display font-extrabold text-[36px] sm:text-[48px] leading-none text-[#f5f0e8] mt-1">Pick a game</h1>
+          <p class="text-sm text-white/60 mt-1">Good games. Great people.</p>
+        </div>
+        <!-- Join a friend banner -->
+        <button id="btn-home-join-banner" class="mt-6 w-full flex items-center justify-between px-4 sm:px-5 py-4 rounded-2xl bg-white/[0.06] hover:bg-white/[0.08] border border-white/10 text-left transition-colors">
+          <span class="font-bold text-white text-sm sm:text-base">Join a friend's game</span>
+          <span class="text-xs text-white/50 flex items-center gap-1">Have a code? Walk right in <span class="text-sm">›</span></span>
+        </button>
+        <!-- Search -->
+        <div class="mt-4 flex gap-2">
+          <div class="flex-1 relative">
+            <span class="absolute left-3.5 top-1/2 -translate-y-1/2 text-white/30">⌕</span>
+            <input id="input-home-search" value="${escape(searchQuery)}" placeholder="Search games" class="w-full pl-9 pr-4 py-3 rounded-xl bg-white/[0.06] border border-white/10 text-white placeholder:text-white/30 text-sm outline-none focus:border-white/20 focus:bg-white/[0.08]" />
+          </div>
+          <button class="w-11 h-11 rounded-xl bg-white/[0.06] border border-white/10 flex items-center justify-center text-white/40 hover:text-white/60">⚙</button>
+        </div>
+        <!-- All games header -->
+        <div class="mt-6 flex items-center justify-between">
+          <h2 class="font-bold text-white text-sm">All games</h2>
+          <span class="text-xs text-white/30">${gamesCount} games</span>
+        </div>
+        <div class="mt-3 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          ${filtered.map(g=> `
+            <button data-game-id="${g.id}" ${g.enabled?'':'disabled'} class="text-left rounded-2xl bg-white/[0.04] hover:${g.enabled?'bg-white/[0.08]':'bg-white/[0.04]'} border border-white/[0.06] p-3 flex items-center gap-3 ${g.enabled?'cursor-pointer':'opacity-60 cursor-not-allowed'} transition-colors">
+              <div class="w-12 h-12 rounded-xl ${g.iconBg} border border-white/10 flex items-center justify-center text-xl shrink-0">${g.icon}</div>
+              <div class="min-w-0 flex-1">
+                <p class="font-bold text-white text-sm leading-none">${escape(g.title)}</p>
+                <p class="text-xs ${g.enabled?'text-[#7ec8e6]':'text-white/40'} mt-0.5 truncate">${escape(g.subtitle)}</p>
+                <p class="text-xs text-white/30 mt-0.5">${g.players} players · ${g.time} min</p>
+              </div>
+              <span class="text-white/20 text-sm">›</span>
+            </button>
+          `).join('')}
+        </div>
+        ${filtered.length===0 ? `<p class="text-center text-sm text-white/30 mt-8">No games match "${escape(searchQuery)}"</p>` : ''}
+      </div>
+    </div>
+  `;
+}
+
+export function renderGamePopup() {
+  return `
+    <div id="game-popup-overlay" class="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+      <div class="relative w-full max-w-[420px] rounded-[28px] bg-[#1e1a2e] border border-white/10 shadow-2xl overflow-hidden p-6 text-center">
+        <button id="btn-popup-close" class="absolute top-3 right-3 w-8 h-8 rounded-full bg-white/10 hover:bg-white/15 border border-white/10 flex items-center justify-center text-white/60">✕</button>
+        <div class="w-16 h-16 mx-auto rounded-2xl bg-gradient-to-br from-[#2a4a6a] to-[#1a3a5a] border border-white/10 flex items-center justify-center text-3xl">🗡️</div>
+        <h2 class="font-display font-extrabold text-[22px] text-white mt-3 leading-none">Quest of Shadows</h2>
+        <p class="text-sm text-white/70 mt-2 leading-snug">Good outnumbers evil, but evil knows exactly who everyone is. Merlin knows too — and has to spend the whole game making sure nobody works out that he does.</p>
+        <p class="text-xs italic text-white/30 mt-2">Inspired by The Resistance: Avalon</p>
+        <div class="mt-4 grid grid-cols-3 divide-x divide-white/10 rounded-2xl bg-black/20 border border-white/5 py-3">
+          <div class="text-center">
+            <p class="font-black text-white text-sm">5-10</p>
+            <p class="text-[10px] tracking-widest font-bold text-white/40">PLAYERS</p>
+          </div>
+          <div class="text-center">
+            <p class="font-black text-white text-sm">15-25</p>
+            <p class="text-[10px] tracking-widest font-bold text-white/40">MINUTES</p>
+          </div>
+          <div class="text-center">
+            <p class="font-black text-white text-sm">Deduction</p>
+            <p class="text-[10px] tracking-widest font-bold text-white/40">TYPE</p>
+          </div>
+        </div>
+        <button id="btn-popup-play" class="mt-4 w-full py-3.5 rounded-full bg-gradient-to-b from-[#a0d8f0] to-[#7ec8e6] hover:from-[#b0e0f5] hover:to-[#8ed0ea] text-[#0a1e2e] font-black tracking-wide shadow-lg">Play now</button>
+        <button id="btn-popup-howto" class="mt-3 w-full flex items-center justify-between px-4 py-3 rounded-2xl bg-white/[0.06] hover:bg-white/[0.08] border border-white/10 text-left">
+          <span class="flex items-center gap-3">
+            <span class="w-8 h-8 rounded-full bg-[#7ec8e6] flex items-center justify-center text-[#0a1e2e] text-xs">▶</span>
+            <span>
+              <p class="font-bold text-white text-sm leading-none">How to play</p>
+              <p class="text-xs text-white/40">4 animated steps</p>
+            </span>
+          </span>
+          <span class="text-white/30">›</span>
+        </button>
+        <button id="btn-popup-join" class="mt-3 w-full py-3.5 rounded-full bg-white/[0.06] hover:bg-white/10 border border-white/10 text-white font-bold">Join a friend's game</button>
+      </div>
+    </div>
+  `;
+}
+
+export function renderJoinCodeScreen(code='') {
+  const clean = (code||'').toUpperCase().replace(/[^A-Z]/g,'').slice(0,4);
+  const display = (clean + '----').slice(0,4).split('').map(ch=> ch==='-' ? '<span class="text-white/20">—</span>' : escape(ch)).join('<span class="w-2"></span>');
+  const canEnter = clean.length===4;
+  return `
+    <div class="min-h-[80vh] flex flex-col bg-[#0f0a1a] -mx-4 sm:-mx-6 lg:-mx-8 -mt-6 sm:-mt-8">
+      <div class="max-w-[600px] mx-auto w-full px-4 sm:px-6 lg:px-8 py-4 flex-1 flex flex-col">
+        <div class="flex items-center justify-between">
+          <button id="btn-join-back" class="w-9 h-9 rounded-full bg-white/10 hover:bg-white/15 border border-white/10 flex items-center justify-center text-white/60">‹</button>
+          <p class="font-display font-bold text-sm tracking-wide text-white/80">Table Party</p>
+          <div class="w-9"></div>
+        </div>
+        <div class="flex-1 flex flex-col items-center justify-center text-center">
+          <h1 class="font-display font-black text-[32px] text-white leading-none">Join a friend</h1>
+          <p class="text-sm text-white/50 mt-2">Ask them for their four-letter game code.</p>
+          <div class="mt-6 relative">
+            <div id="join-code-display" class="w-[280px] h-[64px] rounded-2xl bg-black/20 border border-white/10 flex items-center justify-center gap-2 text-[28px] font-black tracking-[0.4em] text-white">
+              ${clean ? clean.split('').map(ch=> `<span>${escape(ch)}</span>`).join('<span class="w-1"></span>') : '<span class="text-white/20 tracking-[0.6em]">----</span>'}
+            </div>
+            <input id="input-join-code" maxlength="4" value="${escape(clean)}" placeholder="" class="absolute inset-0 opacity-0 w-full h-full text-center uppercase tracking-[0.5em] text-transparent caret-transparent" autocomplete="off" autocapitalize="characters" />
+          </div>
+          <p id="join-code-error" class="text-xs text-rose-400 mt-3 h-4"></p>
+        </div>
+        <button id="btn-join-enter" ${canEnter?'':'disabled'} class="w-full py-4 rounded-full ${canEnter?'bg-[#f5f0e8] hover:bg-white text-[#0a1e2e] font-black':'bg-white/10 text-white/30 font-bold cursor-not-allowed'} border ${canEnter?'border-white/20':'border-white/5'} transition-colors">Enter the code</button>
+      </div>
+    </div>
+  `;
+}

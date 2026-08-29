@@ -2,9 +2,7 @@
 (function() {
 "use strict";
 try { window.__AVALON_BOOTED__ = true; window.__AVALON_BUNDLE_LOADED__ = true; } catch(_) {}
-
 // ---- js/config.js ----
-
 /**
  * js/config.js — Avalon configuration tables (Quest of Shadows) — v3 with extra roles
  * Pure constants, no side effects. Fully commented.
@@ -202,10 +200,7 @@ function generateRoomCode() {
 function isValidRoomCode(code) {
   return typeof code === 'string' && /^[A-Z]{4}$/.test(code);
 }
-
-
 // ---- js/utils.js ----
-
 /**
  * js/utils.js — Pure helper utilities.
  * No DOM, no state — safe to use anywhere.
@@ -311,10 +306,7 @@ function validateName(raw) {
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
-
-
 // ---- js/state.js ----
-
 /**
  * js/state.js — Game mechanics engine (PURE STATE MACHINE)
  * ------------------------------------------------------------------
@@ -340,8 +332,10 @@ function sleep(ms) {
  *   ASSASSINATE, RESET, TIMER_EXPIRED
  */
 
-
-
+  PHASES, ALLOWED_TRANSITIONS, QUEST_SIZES, FAILS_REQUIRED,
+  ROLES, ALLEGIANCE, allegianceOf, getQuestSize, getFailsRequired,
+  getRoleList, MAX_PROPOSAL_TRACKER, WIN_THRESHOLD, STORAGE_VERSION,
+} from './config.js';
 
 // ——— Initial state factory ———
 function createInitialState() {
@@ -1021,17 +1015,12 @@ function reducer(state, action) {
 function isGameOver(state) { return state.phase === PHASES.GAME_OVER; }
 function getLeader(state) { return state.players[state.leaderIndex] || null; }
 function getQuest(state) { return state.quests[state.currentQuest] || null; }
-
-
 // ---- js/storage.js ----
-
 /**
  * js/storage.js — Persistence abstraction (versioned snapshot)
  * Saves entire state to localStorage; validates on load.
  * Handles quota errors gracefully (fallback to memory-only).
  */
-
-
 
 
 /**
@@ -1089,12 +1078,8 @@ function clear() {
     console.warn('[storage] clear failed:', e);
   }
 }
-
-
 const storage = { save, load, clear };
-
 // ---- js/net.js ----
-
 /**
  * js/net.js — Backend abstraction for distributed play (own phones)
  * Supports:
@@ -1102,7 +1087,6 @@ const storage = { save, load, clear };
  *  - HTTP API /api/room/<CODE> via serve.py (real cross-device on same WiFi)
  *  - Falls back gracefully when API not available (Netlify etc.)
  */
-
 
 
 let channels = new Map();
@@ -1146,16 +1130,20 @@ async function fetchRoom(code) {
 function mergeStates(oldState, incomingState) {
   if (!oldState || !incomingState) return incomingState;
   if (oldState.phase !== incomingState.phase) return incomingState;
+  // Same phase — merge votes & revealed to avoid losing concurrent submissions
   let merged = { ...incomingState };
+  // Merge proposal.votes (union)
   if (oldState.proposal && incomingState.proposal && oldState.proposal.votes && incomingState.proposal.votes) {
     const votes = { ...oldState.proposal.votes, ...incomingState.proposal.votes };
     merged.proposal = { ...incomingState.proposal, votes };
   } else if (oldState.proposal && oldState.proposal.votes && !incomingState.proposal?.votes) {
     merged.proposal = { ...incomingState.proposal, votes: { ...oldState.proposal.votes } };
   }
+  // Merge questVotes (union)
   if (oldState.questVotes || incomingState.questVotes) {
     merged.questVotes = { ...(oldState.questVotes||{}), ...(incomingState.questVotes||{}) };
   }
+  // Merge revealed (OR)
   if (Array.isArray(oldState.revealed) && Array.isArray(incomingState.revealed)) {
     const len = Math.max(oldState.revealed.length, incomingState.revealed.length);
     const arr = Array.from({length: len}, (_,i)=> !!(oldState.revealed[i] || incomingState.revealed[i]));
@@ -1165,17 +1153,22 @@ function mergeStates(oldState, incomingState) {
 }
 
 async function pushRoom(code, roomData) {
+  // Merge with both local and server to avoid races
   let existingLocal = getLocalRoom(code) || {};
   let existingServer = null;
   try { existingServer = await fetchRoom(code); } catch(_){}
+  // Prefer server's version if newer, but merge players & state
   let base = existingLocal;
   if (existingServer && existingServer.updatedAt > (existingLocal.updatedAt||0)) base = existingServer;
+  // Deep merge for state
   let mergedState = roomData.state;
   if (base.state && roomData.state) {
     mergedState = mergeStates(base.state, roomData.state);
   } else if (!mergedState && base.state) {
+    // If pushing only players (lobby) and base has state, keep state
     mergedState = base.state;
   }
+  // Merge players by name union (lobby)
   let mergedPlayers = roomData.players;
   if (Array.isArray(base.players) && Array.isArray(roomData.players)) {
     const seen = new Set(roomData.players.map(p=>p.name));
@@ -1246,6 +1239,7 @@ async function joinRoom(code, player) {
 async function updateRoomState(code, newState) {
   let room = await fetchRoom(code);
   if (!room) room = { code, createdAt: Date.now(), players: [], hostId: null };
+  // Merge with server state to avoid losing concurrent votes
   if (room.state) newState = mergeStates(room.state, newState);
   room.state = newState;
   room.updatedAt = Date.now();
@@ -1253,6 +1247,7 @@ async function updateRoomState(code, newState) {
 }
 
 function updateRoomStateSync(code, newState) {
+  // Sync fallback for quick local update (used by dispatch) — also merges with local
   let room = getLocalRoom(code);
   if (!room) room = { code, createdAt: Date.now(), players: [], hostId: null };
   if (room.state) newState = mergeStates(room.state, newState);
@@ -1261,6 +1256,7 @@ function updateRoomStateSync(code, newState) {
   setLocalRoom(code, room);
   const ch = getChannel(code);
   if (ch) ch.postMessage({ type: 'STATE_UPDATE', code, state: newState });
+  // Also try async push in background with merge
   (async()=>{
     try {
       const serverRoom = await fetchRoom(code);
@@ -1338,11 +1334,8 @@ function parseInviteCode() {
   } catch(_){}
   return null;
 }
-
 const net = { pushRoom, createRoom, getRoom, getRoomAsync, joinRoom, updateRoomState, updateRoomStateSync, subscribe, leaveRoom, generateInviteLink, parseInviteCode, fetchRoom, getLocalRoom, setLocalRoom };
-
 // ---- js/ai.js ----
-
 /**
  * js/ai.js — Intelligent bot decisioning (knowledge-scoped)
  * ------------------------------------------------------------------
@@ -1354,8 +1347,6 @@ const net = { pushRoom, createRoom, getRoom, getRoomAsync, joinRoom, updateRoomS
  *
  * Strategies are lightweight heuristics that feel human, not optimal solvers.
  */
-
-
 
 
 /**
@@ -1603,336 +1594,14 @@ function aiAssassinate(aiView, allPlayersPublic, pub) {
   }
   return best;
 }
-
-
 const ai = { aiProposeTeam, aiTeamVote, aiQuestVote, aiAssassinate };
-
-// ---- js/ui/log.js ----
-
-/**
- * js/ui/log.js — Live Game Logs renderer (floating/sidebar panel)
- * Pure render function: (logEntries) -> HTMLElement string
- * Auto-scroll handled by caller.
- */
-
-const TYPE_ICON = {
-  SETUP: '⚙️',
-  REVEAL: '👁️',
-  PROPOSAL: '🛡️',
-  VOTE: '🗳️',
-  QUEST_SUCCESS: '⚔️',
-  QUEST_FAIL: '💀',
-  PHASE: '📜',
-  ASSASSINATION: '🗡️',
-  GAME_OVER: '👑',
-  DEFAULT: '•',
-};
-
-function iconFor(type) {
-  return TYPE_ICON[type] || TYPE_ICON.DEFAULT;
-}
-
-/**
- * Render log panel container.
- * @param {Array} log - state.log
- * @returns {string} HTML
- */
-function renderLog(log) {
-  const entries = log.slice(-40).reverse(); // show latest 40, newest top
-  if (entries.length === 0) {
-    return `
-      <div class="rounded-2xl bg-white/[0.04] border border-white/[0.06] p-4">
-        <p class="text-sm text-stone-500 italic">No events yet. The council awaits…</p>
-      </div>
-    `;
-  }
-  const rows = entries.map(e => {
-    const icon = iconFor(e.type);
-    const time = new Date(e.t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    // Escape text via DOM textContent safety — here we interpolate as text, so escape
-    const text = escape(e.text);
-    const cls = e.type === 'QUEST_FAIL' ? 'text-evil' : e.type === 'QUEST_SUCCESS' ? 'text-good' : 'text-stone-200';
-    return `
-      <div class="log-entry flex gap-3 py-2.5 px-3 rounded-xl hover:bg-white/[0.04] transition-colors border border-transparent hover:border-white/[0.04]">
-        <span class="shrink-0 w-7 h-7 rounded-lg bg-white/[0.06] border border-white/[0.08] flex items-center justify-center text-[13px]">${icon}</span>
-        <div class="min-w-0 flex-1">
-          <p class="text-[13px] leading-snug ${cls}">${text}</p>
-          <p class="text-[11px] text-stone-500 font-mono mt-0.5">${time} · ${e.type}</p>
-        </div>
-      </div>
-    `;
-  }).join('');
-
-  return `
-    <div class="rounded-2xl bg-[#0f172a]/80 border border-white/[0.08] backdrop-blur-xl overflow-hidden shadow-xl">
-      <div class="px-4 py-3 border-b border-white/[0.06] flex items-center justify-between">
-        <h3 class="font-display font-bold text-[13px] tracking-[0.14em] text-white">LIVE LOG</h3>
-        <span class="text-[11px] font-medium px-2 py-1 rounded-full bg-white/[0.06] border border-white/[0.08] text-stone-400">${log.length} events</span>
-      </div>
-      <div id="log-scroll" class="max-h-[320px] overflow-auto divide-y divide-white/[0.03] logs-drawer scrollbar-thin">
-        ${rows}
-      </div>
-    </div>
-  `;
-}
-
-function escape(s) {
-  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-}
-
-
-// ---- js/ui/modals.js ----
-
-/**
- * js/ui/modals.js — Secure overlay modal system (anti-leakage L2)
- * All modals are created then DOM-removed on hide (not display:none).
- * Role cards are ephemeral — never persisted as data-attributes.
- */
-
-
-
-/**
- * Create a full-screen modal portal element.
- * Returns { el, close } — caller must append to #modal-root and call close() to remove.
- */
-function createPortal(html) {
-  const root = document.getElementById('modal-root');
-  const wrapper = document.createElement('div');
-  wrapper.className = 'fixed inset-0 z-[50] flex items-center justify-center p-4';
-  wrapper.innerHTML = `
-    <div class="absolute inset-0 bg-obsidian/85 backdrop-blur-md" data-close></div>
-    <div class="relative w-full max-w-[520px] animate-[slideUp_0.3s_ease-out]">${html}</div>
-  `;
-  // Prevent background scroll leak (risk mitigation)
-  const prevOverflow = document.body.style.overflow;
-  document.body.style.overflow = 'hidden';
-  root.appendChild(wrapper);
-  function close() {
-    wrapper.remove();
-    document.body.style.overflow = prevOverflow;
-  }
-  wrapper.querySelector('[data-close]')?.addEventListener('click', close);
-  // ESC handling
-  function onKey(e) { if (e.key === 'Escape') { close(); document.removeEventListener('keydown', onKey); } }
-  document.addEventListener('keydown', onKey);
-  wrapper._cleanup = () => document.removeEventListener('keydown', onKey);
-  const origClose = close;
-  wrapper.close = () => { wrapper._cleanup(); origClose(); };
-  return { el: wrapper, close: wrapper.close };
-}
-
-/**
- * Secure role discovery modal (Pass the device).
- * Shows cover → tap to reveal → hide & pass.
- * Calls onHide when user confirms hide.
- */
-function showRoleReveal({ playerName, role, allegiance, visionIds, allPlayers, onHide, onNext, isLast }) {
-  const roleMap = {
-    [ROLES.MERLIN]: 'MERLIN',
-    [ROLES.PERCIVAL]: 'PERCIVAL',
-    [ROLES.LOYAL]: 'LOYAL SERVANT',
-    [ROLES.ASSASSIN]: 'ASSASSIN',
-    [ROLES.MORGANA]: 'MORGANA',
-    [ROLES.MORDRED]: 'MORDRED',
-    [ROLES.OBERON]: 'OBERON',
-    [ROLES.MINION]: 'MINION',
-  };
-  const roleLabel = roleMap[role] || role;
-  const allegianceLabel = allegiance === 'GOOD'
-    ? (role===ROLES.PERCIVAL ? 'Percival — Sees Merlin' : role===ROLES.MERLIN ? 'Merlin — Sees Evil' : 'Loyal Servant of Arthur')
-    : (role===ROLES.MORGANA ? 'Morgana — Fools Percival' : role===ROLES.MORDRED ? 'Mordred — Hidden from Merlin' : role===ROLES.OBERON ? 'Oberon — Isolated Evil' : 'Minion of Mordred');
-  const isGood = allegiance === 'GOOD';
-  const visionNames = visionIds.map(id => allPlayers.find(p => p.id === id)?.name || id);
-
-  let revealed = false;
-  const html = `
-    <div class="rounded-[20px] overflow-hidden border border-white/10 shadow-2xl bg-[#111827]">
-      <div class="px-6 py-4 border-b border-white/10 flex items-center justify-between bg-gradient-to-r from-white/[0.06] to-transparent">
-        <div>
-          <p class="text-[11px] tracking-[0.16em] font-semibold text-stone-400">YOUR PRIVATE ROLE — ${escape(roleLabel)}</p>
-          <h2 class="font-display font-extrabold text-[18px] leading-none text-white mt-1">${escape(playerName)}</h2>
-          <p class="text-xs text-stone-500">Only your device shows this</p>
-        </div>
-        <div class="w-9 h-9 rounded-xl bg-gold text-obsidian flex items-center justify-center font-display font-extrabold">?</div>
-      </div>
-      <div class="p-6">
-        <!-- Cover state -->
-        <div id="reveal-cover" class="text-center py-8">
-          <div class="w-20 h-20 mx-auto rounded-2xl bg-gradient-to-br from-slate-800 to-slate-900 border border-white/10 flex items-center justify-center text-3xl shadow-inner">🛡️</div>
-          <p class="mt-4 text-sm text-stone-300">This is visible only on <span class="text-white font-semibold">${escape(playerName)}</span>’s phone.</p>
-          <p class="text-xs text-stone-500 mt-1">No passing needed — each player reveals on their own device.</p>
-          <button id="btn-reveal" class="mt-5 w-full py-3.5 rounded-xl bg-gold text-obsidian font-bold tracking-wide hover:bg-amber-300 transition-colors shadow-lg shadow-gold/20">
-            TAP TO REVEAL ROLE
-          </button>
-          <p class="mt-3 text-xs text-stone-500">Auto-hides in 10s • Don’t screenshot</p>
-        </div>
-        <!-- Revealed state (hidden initially, created here but not leaked via data-attrs) -->
-        <div id="reveal-card" class="hidden">
-          <div class="rounded-2xl p-[1px] bg-gradient-to-br ${isGood ? 'from-cyan-400/60 to-blue-500/40' : 'from-rose-400/60 to-red-600/40'}">
-            <div class="rounded-[15px] bg-[#0f172a] p-5">
-              <div class="flex items-start justify-between gap-4">
-                <div>
-                  <p class="text-[11px] tracking-[0.16em] font-bold ${isGood ? 'text-good' : 'text-evil'}">${escape(allegianceLabel).toUpperCase()}</p>
-                  <h3 class="font-display font-extrabold text-2xl leading-none text-white mt-1">${escape(roleLabel)}</h3>
-                  <p class="text-sm text-stone-400 mt-1">${roleDesc(role)}</p>
-                </div>
-                <div class="shrink-0 w-14 h-14 rounded-xl ${isGood ? 'bg-good/15 border-good/30 text-good' : 'bg-evil/15 border-evil/30 text-evil'} border flex items-center justify-center text-2xl">
-                  ${isGood ? '⚔️' : '🗡️'}
-                </div>
-              </div>
-              ${visionNames.length ? `
-                <div class="mt-5 rounded-xl ${role===ROLES.MERLIN ? 'bg-good/10 border-good/20' : role===ROLES.PERCIVAL ? 'bg-cyan-500/10 border-cyan-500/20' : 'bg-evil/10 border-evil/20'} border p-3.5">
-                  <p class="text-[11px] font-bold tracking-[0.14em] ${role===ROLES.MERLIN ? 'text-good' : role===ROLES.PERCIVAL ? 'text-cyan-300' : 'text-evil'}">
-                    ${role===ROLES.MERLIN ? 'YOU SEE EVIL' : role===ROLES.PERCIVAL ? 'YOU SEE MERLIN' : 'YOUR FELLOW EVIL'}
-                  </p>
-                  <p class="text-sm text-white font-medium mt-1.5 flex flex-wrap gap-1.5">
-                    ${visionNames.map(n => `<span class="px-2.5 py-1 rounded-full bg-white/10 border border-white/10 text-xs">${escape(n)}${role===ROLES.PERCIVAL ? '<span class="ml-1 text-[10px] text-white/60">?</span>' : ''}</span>`).join('')}
-                  </p>
-                  <p class="text-xs text-stone-400 mt-2">${role===ROLES.MERLIN ? 'Mordred is hidden from you. Oberon appears.' : role===ROLES.PERCIVAL ? 'One is Merlin, one may be Morgana. Choose who to trust.' : role===ROLES.OBERON ? 'You are isolated — no one knows you.' : 'Coordinate, but don’t be obvious.'}</p>
-                </div>
-              ` : `
-                <div class="mt-5 rounded-xl bg-white/[0.04] border border-white/[0.06] p-3.5">
-                  <p class="text-xs text-stone-400">${role===ROLES.OBERON ? 'You are isolated Evil — you see no one and no one sees you.' : 'You have no special vision. Watch votes and proposals to deduce Evil.'}</p>
-                </div>
-              `}
-            </div>
-          </div>
-           <button id="btn-hide" class="mt-5 w-full py-3.5 rounded-xl bg-white text-obsidian font-bold hover:bg-stone-100 transition-colors">
-            HIDE ROLE
-          </button>
-          <p class="mt-2 text-center text-xs text-stone-500">Your role is hidden again. Check the board on your phone.</p>
-        </div>
-      </div>
-    </div>
-  `;
-  const { close } = createPortal(html);
-  const cover = document.getElementById('reveal-cover');
-  const card = document.getElementById('reveal-card');
-  const btnReveal = document.getElementById('btn-reveal');
-  const btnHide = document.getElementById('btn-hide');
-
-  let autoHideTimer = null;
-  function doReveal() {
-    if (revealed) return;
-    revealed = true;
-    cover.classList.add('hidden');
-    card.classList.remove('hidden');
-    // Auto-hide after 10s (secure)
-    autoHideTimer = setTimeout(() => doHide(), 10000);
-  }
-  function doHide() {
-    clearTimeout(autoHideTimer);
-    close();
-    onHide?.();
-    // If not last, caller will advance revealIndex and re-open next
-    if (isLast) onNext?.();
-    else onNext?.();
-  }
-  btnReveal.addEventListener('click', doReveal);
-  btnHide.addEventListener('click', doHide);
-  return { close };
-}
-
-function roleDesc(role) {
-  if (role === ROLES.MERLIN) return 'You see all Evil except Mordred. Guide Good without being found.';
-  if (role === ROLES.PERCIVAL) return 'You see Merlin (Morgana appears as Merlin). Protect the real one.';
-  if (role === ROLES.ASSASSIN) return 'You know evil (except Oberon). Find and kill Merlin at the end.';
-  if (role === ROLES.MORGANA) return 'You appear as Merlin to Percival. Deceive him.';
-  if (role === ROLES.MORDRED) return 'You are hidden from Merlin. Stay covert.';
-  if (role === ROLES.OBERON) return 'You are isolated Evil — you see no one, no one sees you.';
-  if (role === ROLES.LOYAL) return 'Find Evil through voting and quests.';
-  return 'Sabotage quests. Hide among Good. Protect the Assassin.';
-}
-
-/**
- * Quest vote modal — secret Success/Fail selection for team members.
- * Good sees only Success (Fail disabled with tooltip).
- */
-function showQuestVote({ playerName, isEvil, onSubmit }) {
-  const html = `
-    <div class="rounded-[20px] overflow-hidden border border-white/10 shadow-2xl bg-[#111827]">
-      <div class="px-6 py-4 border-b border-white/10">
-        <p class="text-[11px] tracking-[0.16em] font-semibold text-stone-400">SECRET QUEST VOTE</p>
-        <h2 class="font-display font-bold text-lg text-white mt-1">${escape(playerName)} — choose your card</h2>
-        <p class="text-xs text-stone-500 mt-1">Only you can see this. Make your play, then pass.</p>
-      </div>
-      <div class="p-6">
-        <div class="grid grid-cols-2 gap-4">
-          <button data-vote="SUCCESS" class="quest-card success group relative rounded-2xl border-2 border-white/10 bg-gradient-to-br from-cyan-900/30 to-blue-900/30 p-5 text-center hover:border-good/50">
-            <div class="w-12 h-12 mx-auto rounded-xl bg-good/20 border border-good/30 flex items-center justify-center text-xl">✓</div>
-            <p class="font-display font-extrabold tracking-wide text-white mt-3">SUCCESS</p>
-            <p class="text-xs text-stone-400 mt-1">Quest succeeds</p>
-            <div class="absolute inset-0 rounded-2xl pointer-events-none group-[.selected]:ring-2 group-[.selected]:ring-good"></div>
-          </button>
-          <button data-vote="FAIL" ${isEvil ? '' : 'disabled'} class="quest-card fail group relative rounded-2xl border-2 border-white/10 ${isEvil ? 'bg-gradient-to-br from-rose-900/30 to-red-900/30 hover:border-evil/50' : 'bg-white/[0.03] opacity-50 cursor-not-allowed'} p-5 text-center">
-            <div class="w-12 h-12 mx-auto rounded-xl ${isEvil ? 'bg-evil/20 border border-evil/30' : 'bg-white/10 border border-white/10'} flex items-center justify-center text-xl">✕</div>
-            <p class="font-display font-extrabold tracking-wide ${isEvil ? 'text-white' : 'text-stone-500'} mt-3">FAIL</p>
-            <p class="text-xs ${isEvil ? 'text-stone-400' : 'text-stone-600'} mt-1">${isEvil ? 'Sabotage quest' : 'Good must succeed'}</p>
-          </button>
-        </div>
-        ${!isEvil ? '<p class="mt-3 text-center text-xs text-amber-300/80">Loyal servants must play Success.</p>' : '<p class="mt-3 text-center text-xs text-stone-500">Evil may play either. Choose wisely — you stay hidden.</p>'}
-        <button id="btn-confirm-quest" disabled class="mt-5 w-full py-3.5 rounded-xl bg-white/10 text-stone-500 font-bold cursor-not-allowed transition-colors">Select a card</button>
-      </div>
-    </div>
-  `;
-  const { close } = createPortal(html);
-  let selected = null;
-  const btnConfirm = document.getElementById('btn-confirm-quest');
-  const cards = document.querySelectorAll('.quest-card');
-  cards.forEach(c => {
-    c.addEventListener('click', () => {
-      if (c.hasAttribute('disabled')) return;
-      cards.forEach(x => x.classList.remove('selected'));
-      c.classList.add('selected');
-      selected = c.dataset.vote;
-      btnConfirm.disabled = false;
-      btnConfirm.className = 'mt-5 w-full py-3.5 rounded-xl bg-gold text-obsidian font-bold hover:bg-amber-300 transition-colors shadow-lg shadow-gold/20';
-      btnConfirm.textContent = `PLAY ${selected}`;
-    });
-  });
-  btnConfirm.addEventListener('click', () => {
-    if (!selected) return;
-    close();
-    onSubmit(selected);
-  });
-  return { close };
-}
-
-/**
- * Simple confirm modal for assassination, etc.
- */
-function showConfirm({ title, body, confirmText = 'Confirm', cancelText = 'Cancel', onConfirm, variant = 'default' }) {
-  const html = `
-    <div class="rounded-2xl overflow-hidden border border-white/10 shadow-2xl bg-[#111827] p-6">
-      <h3 class="font-display font-bold text-lg text-white">${escape(title)}</h3>
-      <p class="text-sm text-stone-300 mt-2 leading-relaxed">${body}</p>
-      <div class="flex gap-3 mt-6">
-        <button data-cancel class="flex-1 py-3 rounded-xl bg-white/10 hover:bg-white/20 text-white font-semibold transition-colors">${escape(cancelText)}</button>
-        <button data-confirm class="flex-1 py-3 rounded-xl ${variant==='danger' ? 'bg-evil hover:bg-rose-600 text-white' : 'bg-gold hover:bg-amber-300 text-obsidian'} font-bold transition-colors">${escape(confirmText)}</button>
-      </div>
-    </div>
-  `;
-  const { close } = createPortal(html);
-  const portalEl = document.getElementById('modal-root').lastElementChild;
-  portalEl.querySelector('[data-cancel]').addEventListener('click', close);
-  portalEl.querySelector('[data-confirm]').addEventListener('click', () => { close(); onConfirm?.(); });
-  return { close };
-}
-
-function escape(s) {
-  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-}
-
-
 // ---- js/ui/components.js ----
-
 /**
  * js/ui/components.js — Pure render helpers for Quest Track, Player Grid, Proposal Tracker, Timer, etc.
  * Each export is a function (publicState, dispatch) => HTML string or DOM helper.
  * No state mutation, no side effects beyond string generation.
  * Updated for Table Party blended lobby + extra roles.
  */
-
 
 
 // ——— Quest Track ———
@@ -2442,22 +2111,448 @@ function renderExactBottomButton(text, id, opts={}) {
   return `<button id="${id}" ${disabled} class="${cls} transition-colors">${escape(text)}</button>`;
 }
 
+// ——— TABLE PARTY HOME (Pick a game) ———
+const HOME_GAMES = [
+  { id:'quest-of-shadows', title:'Quest of Shadows', subtitle:'Good outnumbers evil, but evil knows...', desc:'Good outnumbers evil, but evil knows exactly who everyone is. Merlin knows too — and has to spend the whole game making sure nobody works out that he does.', inspired:'Inspired by The Resistance: Avalon', icon:'🗡️', iconBg:'bg-[#2a4a5a]', players:'5-10', time:'15-25', type:'Deduction', enabled:true },
+  { id:'fake-answers', title:'Fake Answers', subtitle:'Inspired by Psych!', players:'3-12', time:'10 min', icon:'🔥', iconBg:'bg-[#3a2a1a]', enabled:false },
+  { id:'boggle', title:'Boggle', subtitle:'Shake. Hunt. Don\'t match.', players:'1-12', time:'10 min', icon:'🎲', iconBg:'bg-[#2a3a1a]', enabled:false },
+  { id:'quip', title:'Quip Battle', subtitle:'Inspired by Quiplash', players:'3-12', time:'15 min', icon:'💬', iconBg:'bg-[#1a3a4a]', enabled:false },
+];
 
+function renderHome(searchQuery='') {
+  const q = (searchQuery||'').toLowerCase().trim();
+  const filtered = !q ? HOME_GAMES : HOME_GAMES.filter(g=> g.title.toLowerCase().includes(q) || g.subtitle.toLowerCase().includes(q));
+  const gamesCount = filtered.length;
+  return `
+    <div class="min-h-screen bg-[#0f0a1a] -mx-4 sm:-mx-6 lg:-mx-8 -mt-6 sm:-mt-8">
+      <div class="max-w-[1200px] mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
+        <!-- TableParty header -->
+        <div class="text-center pt-2">
+          <p class="font-display font-bold text-xs tracking-[0.18em] text-white/60">Table Party</p>
+          <h1 class="font-display font-extrabold text-[36px] sm:text-[48px] leading-none text-[#f5f0e8] mt-1">Pick a game</h1>
+          <p class="text-sm text-white/60 mt-1">Good games. Great people.</p>
+        </div>
+        <!-- Join a friend banner -->
+        <button id="btn-home-join-banner" class="mt-6 w-full flex items-center justify-between px-4 sm:px-5 py-4 rounded-2xl bg-white/[0.06] hover:bg-white/[0.08] border border-white/10 text-left transition-colors">
+          <span class="font-bold text-white text-sm sm:text-base">Join a friend's game</span>
+          <span class="text-xs text-white/50 flex items-center gap-1">Have a code? Walk right in <span class="text-sm">›</span></span>
+        </button>
+        <!-- Search -->
+        <div class="mt-4 flex gap-2">
+          <div class="flex-1 relative">
+            <span class="absolute left-3.5 top-1/2 -translate-y-1/2 text-white/30">⌕</span>
+            <input id="input-home-search" value="${escape(searchQuery)}" placeholder="Search games" class="w-full pl-9 pr-4 py-3 rounded-xl bg-white/[0.06] border border-white/10 text-white placeholder:text-white/30 text-sm outline-none focus:border-white/20 focus:bg-white/[0.08]" />
+          </div>
+          <button class="w-11 h-11 rounded-xl bg-white/[0.06] border border-white/10 flex items-center justify-center text-white/40 hover:text-white/60">⚙</button>
+        </div>
+        <!-- All games header -->
+        <div class="mt-6 flex items-center justify-between">
+          <h2 class="font-bold text-white text-sm">All games</h2>
+          <span class="text-xs text-white/30">${gamesCount} games</span>
+        </div>
+        <div class="mt-3 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          ${filtered.map(g=> `
+            <button data-game-id="${g.id}" ${g.enabled?'':'disabled'} class="text-left rounded-2xl bg-white/[0.04] hover:${g.enabled?'bg-white/[0.08]':'bg-white/[0.04]'} border border-white/[0.06] p-3 flex items-center gap-3 ${g.enabled?'cursor-pointer':'opacity-60 cursor-not-allowed'} transition-colors">
+              <div class="w-12 h-12 rounded-xl ${g.iconBg} border border-white/10 flex items-center justify-center text-xl shrink-0">${g.icon}</div>
+              <div class="min-w-0 flex-1">
+                <p class="font-bold text-white text-sm leading-none">${escape(g.title)}</p>
+                <p class="text-xs ${g.enabled?'text-[#7ec8e6]':'text-white/40'} mt-0.5 truncate">${escape(g.subtitle)}</p>
+                <p class="text-xs text-white/30 mt-0.5">${g.players} players · ${g.time} min</p>
+              </div>
+              <span class="text-white/20 text-sm">›</span>
+            </button>
+          `).join('')}
+        </div>
+        ${filtered.length===0 ? `<p class="text-center text-sm text-white/30 mt-8">No games match "${escape(searchQuery)}"</p>` : ''}
+      </div>
+    </div>
+  `;
+}
+
+function renderGamePopup() {
+  return `
+    <div id="game-popup-overlay" class="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+      <div class="relative w-full max-w-[420px] rounded-[28px] bg-[#1e1a2e] border border-white/10 shadow-2xl overflow-hidden p-6 text-center">
+        <button id="btn-popup-close" class="absolute top-3 right-3 w-8 h-8 rounded-full bg-white/10 hover:bg-white/15 border border-white/10 flex items-center justify-center text-white/60">✕</button>
+        <div class="w-16 h-16 mx-auto rounded-2xl bg-gradient-to-br from-[#2a4a6a] to-[#1a3a5a] border border-white/10 flex items-center justify-center text-3xl">🗡️</div>
+        <h2 class="font-display font-extrabold text-[22px] text-white mt-3 leading-none">Quest of Shadows</h2>
+        <p class="text-sm text-white/70 mt-2 leading-snug">Good outnumbers evil, but evil knows exactly who everyone is. Merlin knows too — and has to spend the whole game making sure nobody works out that he does.</p>
+        <p class="text-xs italic text-white/30 mt-2">Inspired by The Resistance: Avalon</p>
+        <div class="mt-4 grid grid-cols-3 divide-x divide-white/10 rounded-2xl bg-black/20 border border-white/5 py-3">
+          <div class="text-center">
+            <p class="font-black text-white text-sm">5-10</p>
+            <p class="text-[10px] tracking-widest font-bold text-white/40">PLAYERS</p>
+          </div>
+          <div class="text-center">
+            <p class="font-black text-white text-sm">15-25</p>
+            <p class="text-[10px] tracking-widest font-bold text-white/40">MINUTES</p>
+          </div>
+          <div class="text-center">
+            <p class="font-black text-white text-sm">Deduction</p>
+            <p class="text-[10px] tracking-widest font-bold text-white/40">TYPE</p>
+          </div>
+        </div>
+        <button id="btn-popup-play" class="mt-4 w-full py-3.5 rounded-full bg-gradient-to-b from-[#a0d8f0] to-[#7ec8e6] hover:from-[#b0e0f5] hover:to-[#8ed0ea] text-[#0a1e2e] font-black tracking-wide shadow-lg">Play now</button>
+        <button id="btn-popup-howto" class="mt-3 w-full flex items-center justify-between px-4 py-3 rounded-2xl bg-white/[0.06] hover:bg-white/[0.08] border border-white/10 text-left">
+          <span class="flex items-center gap-3">
+            <span class="w-8 h-8 rounded-full bg-[#7ec8e6] flex items-center justify-center text-[#0a1e2e] text-xs">▶</span>
+            <span>
+              <p class="font-bold text-white text-sm leading-none">How to play</p>
+              <p class="text-xs text-white/40">4 animated steps</p>
+            </span>
+          </span>
+          <span class="text-white/30">›</span>
+        </button>
+        <button id="btn-popup-join" class="mt-3 w-full py-3.5 rounded-full bg-white/[0.06] hover:bg-white/10 border border-white/10 text-white font-bold">Join a friend's game</button>
+      </div>
+    </div>
+  `;
+}
+
+function renderJoinCodeScreen(code='') {
+  const clean = (code||'').toUpperCase().replace(/[^A-Z]/g,'').slice(0,4);
+  const display = (clean + '----').slice(0,4).split('').map(ch=> ch==='-' ? '<span class="text-white/20">—</span>' : escape(ch)).join('<span class="w-2"></span>');
+  const canEnter = clean.length===4;
+  return `
+    <div class="min-h-[80vh] flex flex-col bg-[#0f0a1a] -mx-4 sm:-mx-6 lg:-mx-8 -mt-6 sm:-mt-8">
+      <div class="max-w-[600px] mx-auto w-full px-4 sm:px-6 lg:px-8 py-4 flex-1 flex flex-col">
+        <div class="flex items-center justify-between">
+          <button id="btn-join-back" class="w-9 h-9 rounded-full bg-white/10 hover:bg-white/15 border border-white/10 flex items-center justify-center text-white/60">‹</button>
+          <p class="font-display font-bold text-sm tracking-wide text-white/80">Table Party</p>
+          <div class="w-9"></div>
+        </div>
+        <div class="flex-1 flex flex-col items-center justify-center text-center">
+          <h1 class="font-display font-black text-[32px] text-white leading-none">Join a friend</h1>
+          <p class="text-sm text-white/50 mt-2">Ask them for their four-letter game code.</p>
+          <div class="mt-6 relative">
+            <div id="join-code-display" class="w-[280px] h-[64px] rounded-2xl bg-black/20 border border-white/10 flex items-center justify-center gap-2 text-[28px] font-black tracking-[0.4em] text-white">
+              ${clean ? clean.split('').map(ch=> `<span>${escape(ch)}</span>`).join('<span class="w-1"></span>') : '<span class="text-white/20 tracking-[0.6em]">----</span>'}
+            </div>
+            <input id="input-join-code" maxlength="4" value="${escape(clean)}" placeholder="" class="absolute inset-0 opacity-0 w-full h-full text-center uppercase tracking-[0.5em] text-transparent caret-transparent" autocomplete="off" autocapitalize="characters" />
+          </div>
+          <p id="join-code-error" class="text-xs text-rose-400 mt-3 h-4"></p>
+        </div>
+        <button id="btn-join-enter" ${canEnter?'':'disabled'} class="w-full py-4 rounded-full ${canEnter?'bg-[#f5f0e8] hover:bg-white text-[#0a1e2e] font-black':'bg-white/10 text-white/30 font-bold cursor-not-allowed'} border ${canEnter?'border-white/20':'border-white/5'} transition-colors">Enter the code</button>
+      </div>
+    </div>
+  `;
+}
+// ---- js/ui/log.js ----
+/**
+ * js/ui/log.js — Live Game Logs renderer (floating/sidebar panel)
+ * Pure render function: (logEntries) -> HTMLElement string
+ * Auto-scroll handled by caller.
+ */
+
+const TYPE_ICON = {
+  SETUP: '⚙️',
+  REVEAL: '👁️',
+  PROPOSAL: '🛡️',
+  VOTE: '🗳️',
+  QUEST_SUCCESS: '⚔️',
+  QUEST_FAIL: '💀',
+  PHASE: '📜',
+  ASSASSINATION: '🗡️',
+  GAME_OVER: '👑',
+  DEFAULT: '•',
+};
+
+function iconFor(type) {
+  return TYPE_ICON[type] || TYPE_ICON.DEFAULT;
+}
+
+/**
+ * Render log panel container.
+ * @param {Array} log - state.log
+ * @returns {string} HTML
+ */
+function renderLog(log) {
+  const entries = log.slice(-40).reverse(); // show latest 40, newest top
+  if (entries.length === 0) {
+    return `
+      <div class="rounded-2xl bg-white/[0.04] border border-white/[0.06] p-4">
+        <p class="text-sm text-stone-500 italic">No events yet. The council awaits…</p>
+      </div>
+    `;
+  }
+  const rows = entries.map(e => {
+    const icon = iconFor(e.type);
+    const time = new Date(e.t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    // Escape text via DOM textContent safety — here we interpolate as text, so escape
+    const text = escape(e.text);
+    const cls = e.type === 'QUEST_FAIL' ? 'text-evil' : e.type === 'QUEST_SUCCESS' ? 'text-good' : 'text-stone-200';
+    return `
+      <div class="log-entry flex gap-3 py-2.5 px-3 rounded-xl hover:bg-white/[0.04] transition-colors border border-transparent hover:border-white/[0.04]">
+        <span class="shrink-0 w-7 h-7 rounded-lg bg-white/[0.06] border border-white/[0.08] flex items-center justify-center text-[13px]">${icon}</span>
+        <div class="min-w-0 flex-1">
+          <p class="text-[13px] leading-snug ${cls}">${text}</p>
+          <p class="text-[11px] text-stone-500 font-mono mt-0.5">${time} · ${e.type}</p>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  return `
+    <div class="rounded-2xl bg-[#0f172a]/80 border border-white/[0.08] backdrop-blur-xl overflow-hidden shadow-xl">
+      <div class="px-4 py-3 border-b border-white/[0.06] flex items-center justify-between">
+        <h3 class="font-display font-bold text-[13px] tracking-[0.14em] text-white">LIVE LOG</h3>
+        <span class="text-[11px] font-medium px-2 py-1 rounded-full bg-white/[0.06] border border-white/[0.08] text-stone-400">${log.length} events</span>
+      </div>
+      <div id="log-scroll" class="max-h-[320px] overflow-auto divide-y divide-white/[0.03] logs-drawer scrollbar-thin">
+        ${rows}
+      </div>
+    </div>
+  `;
+}
+
+function escape(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+// ---- js/ui/modals.js ----
+/**
+ * js/ui/modals.js — Secure overlay modal system (anti-leakage L2)
+ * All modals are created then DOM-removed on hide (not display:none).
+ * Role cards are ephemeral — never persisted as data-attributes.
+ */
+
+
+/**
+ * Create a full-screen modal portal element.
+ * Returns { el, close } — caller must append to #modal-root and call close() to remove.
+ */
+function createPortal(html) {
+  const root = document.getElementById('modal-root');
+  const wrapper = document.createElement('div');
+  wrapper.className = 'fixed inset-0 z-[50] flex items-center justify-center p-4';
+  wrapper.innerHTML = `
+    <div class="absolute inset-0 bg-obsidian/85 backdrop-blur-md" data-close></div>
+    <div class="relative w-full max-w-[520px] animate-[slideUp_0.3s_ease-out]">${html}</div>
+  `;
+  // Prevent background scroll leak (risk mitigation)
+  const prevOverflow = document.body.style.overflow;
+  document.body.style.overflow = 'hidden';
+  root.appendChild(wrapper);
+  function close() {
+    wrapper.remove();
+    document.body.style.overflow = prevOverflow;
+  }
+  wrapper.querySelector('[data-close]')?.addEventListener('click', close);
+  // ESC handling
+  function onKey(e) { if (e.key === 'Escape') { close(); document.removeEventListener('keydown', onKey); } }
+  document.addEventListener('keydown', onKey);
+  wrapper._cleanup = () => document.removeEventListener('keydown', onKey);
+  const origClose = close;
+  wrapper.close = () => { wrapper._cleanup(); origClose(); };
+  return { el: wrapper, close: wrapper.close };
+}
+
+/**
+ * Secure role discovery modal (Pass the device).
+ * Shows cover → tap to reveal → hide & pass.
+ * Calls onHide when user confirms hide.
+ */
+function showRoleReveal({ playerName, role, allegiance, visionIds, allPlayers, onHide, onNext, isLast }) {
+  const roleMap = {
+    [ROLES.MERLIN]: 'MERLIN',
+    [ROLES.PERCIVAL]: 'PERCIVAL',
+    [ROLES.LOYAL]: 'LOYAL SERVANT',
+    [ROLES.ASSASSIN]: 'ASSASSIN',
+    [ROLES.MORGANA]: 'MORGANA',
+    [ROLES.MORDRED]: 'MORDRED',
+    [ROLES.OBERON]: 'OBERON',
+    [ROLES.MINION]: 'MINION',
+  };
+  const roleLabel = roleMap[role] || role;
+  const allegianceLabel = allegiance === 'GOOD'
+    ? (role===ROLES.PERCIVAL ? 'Percival — Sees Merlin' : role===ROLES.MERLIN ? 'Merlin — Sees Evil' : 'Loyal Servant of Arthur')
+    : (role===ROLES.MORGANA ? 'Morgana — Fools Percival' : role===ROLES.MORDRED ? 'Mordred — Hidden from Merlin' : role===ROLES.OBERON ? 'Oberon — Isolated Evil' : 'Minion of Mordred');
+  const isGood = allegiance === 'GOOD';
+  const visionNames = visionIds.map(id => allPlayers.find(p => p.id === id)?.name || id);
+
+  let revealed = false;
+  const html = `
+    <div class="rounded-[20px] overflow-hidden border border-white/10 shadow-2xl bg-[#111827]">
+      <div class="px-6 py-4 border-b border-white/10 flex items-center justify-between bg-gradient-to-r from-white/[0.06] to-transparent">
+        <div>
+          <p class="text-[11px] tracking-[0.16em] font-semibold text-stone-400">YOUR PRIVATE ROLE — ${escape(roleLabel)}</p>
+          <h2 class="font-display font-extrabold text-[18px] leading-none text-white mt-1">${escape(playerName)}</h2>
+          <p class="text-xs text-stone-500">Only your device shows this</p>
+        </div>
+        <div class="w-9 h-9 rounded-xl bg-gold text-obsidian flex items-center justify-center font-display font-extrabold">?</div>
+      </div>
+      <div class="p-6">
+        <!-- Cover state -->
+        <div id="reveal-cover" class="text-center py-8">
+          <div class="w-20 h-20 mx-auto rounded-2xl bg-gradient-to-br from-slate-800 to-slate-900 border border-white/10 flex items-center justify-center text-3xl shadow-inner">🛡️</div>
+          <p class="mt-4 text-sm text-stone-300">This is visible only on <span class="text-white font-semibold">${escape(playerName)}</span>’s phone.</p>
+          <p class="text-xs text-stone-500 mt-1">No passing needed — each player reveals on their own device.</p>
+          <button id="btn-reveal" class="mt-5 w-full py-3.5 rounded-xl bg-gold text-obsidian font-bold tracking-wide hover:bg-amber-300 transition-colors shadow-lg shadow-gold/20">
+            TAP TO REVEAL ROLE
+          </button>
+          <p class="mt-3 text-xs text-stone-500">Auto-hides in 10s • Don’t screenshot</p>
+        </div>
+        <!-- Revealed state (hidden initially, created here but not leaked via data-attrs) -->
+        <div id="reveal-card" class="hidden">
+          <div class="rounded-2xl p-[1px] bg-gradient-to-br ${isGood ? 'from-cyan-400/60 to-blue-500/40' : 'from-rose-400/60 to-red-600/40'}">
+            <div class="rounded-[15px] bg-[#0f172a] p-5">
+              <div class="flex items-start justify-between gap-4">
+                <div>
+                  <p class="text-[11px] tracking-[0.16em] font-bold ${isGood ? 'text-good' : 'text-evil'}">${escape(allegianceLabel).toUpperCase()}</p>
+                  <h3 class="font-display font-extrabold text-2xl leading-none text-white mt-1">${escape(roleLabel)}</h3>
+                  <p class="text-sm text-stone-400 mt-1">${roleDesc(role)}</p>
+                </div>
+                <div class="shrink-0 w-14 h-14 rounded-xl ${isGood ? 'bg-good/15 border-good/30 text-good' : 'bg-evil/15 border-evil/30 text-evil'} border flex items-center justify-center text-2xl">
+                  ${isGood ? '⚔️' : '🗡️'}
+                </div>
+              </div>
+              ${visionNames.length ? `
+                <div class="mt-5 rounded-xl ${role===ROLES.MERLIN ? 'bg-good/10 border-good/20' : role===ROLES.PERCIVAL ? 'bg-cyan-500/10 border-cyan-500/20' : 'bg-evil/10 border-evil/20'} border p-3.5">
+                  <p class="text-[11px] font-bold tracking-[0.14em] ${role===ROLES.MERLIN ? 'text-good' : role===ROLES.PERCIVAL ? 'text-cyan-300' : 'text-evil'}">
+                    ${role===ROLES.MERLIN ? 'YOU SEE EVIL' : role===ROLES.PERCIVAL ? 'YOU SEE MERLIN' : 'YOUR FELLOW EVIL'}
+                  </p>
+                  <p class="text-sm text-white font-medium mt-1.5 flex flex-wrap gap-1.5">
+                    ${visionNames.map(n => `<span class="px-2.5 py-1 rounded-full bg-white/10 border border-white/10 text-xs">${escape(n)}${role===ROLES.PERCIVAL ? '<span class="ml-1 text-[10px] text-white/60">?</span>' : ''}</span>`).join('')}
+                  </p>
+                  <p class="text-xs text-stone-400 mt-2">${role===ROLES.MERLIN ? 'Mordred is hidden from you. Oberon appears.' : role===ROLES.PERCIVAL ? 'One is Merlin, one may be Morgana. Choose who to trust.' : role===ROLES.OBERON ? 'You are isolated — no one knows you.' : 'Coordinate, but don’t be obvious.'}</p>
+                </div>
+              ` : `
+                <div class="mt-5 rounded-xl bg-white/[0.04] border border-white/[0.06] p-3.5">
+                  <p class="text-xs text-stone-400">${role===ROLES.OBERON ? 'You are isolated Evil — you see no one and no one sees you.' : 'You have no special vision. Watch votes and proposals to deduce Evil.'}</p>
+                </div>
+              `}
+            </div>
+          </div>
+           <button id="btn-hide" class="mt-5 w-full py-3.5 rounded-xl bg-white text-obsidian font-bold hover:bg-stone-100 transition-colors">
+            HIDE ROLE
+          </button>
+          <p class="mt-2 text-center text-xs text-stone-500">Your role is hidden again. Check the board on your phone.</p>
+        </div>
+      </div>
+    </div>
+  `;
+  const { close } = createPortal(html);
+  const cover = document.getElementById('reveal-cover');
+  const card = document.getElementById('reveal-card');
+  const btnReveal = document.getElementById('btn-reveal');
+  const btnHide = document.getElementById('btn-hide');
+
+  let autoHideTimer = null;
+  function doReveal() {
+    if (revealed) return;
+    revealed = true;
+    cover.classList.add('hidden');
+    card.classList.remove('hidden');
+    // Auto-hide after 10s (secure)
+    autoHideTimer = setTimeout(() => doHide(), 10000);
+  }
+  function doHide() {
+    clearTimeout(autoHideTimer);
+    close();
+    onHide?.();
+    // If not last, caller will advance revealIndex and re-open next
+    if (isLast) onNext?.();
+    else onNext?.();
+  }
+  btnReveal.addEventListener('click', doReveal);
+  btnHide.addEventListener('click', doHide);
+  return { close };
+}
+
+function roleDesc(role) {
+  if (role === ROLES.MERLIN) return 'You see all Evil except Mordred. Guide Good without being found.';
+  if (role === ROLES.PERCIVAL) return 'You see Merlin (Morgana appears as Merlin). Protect the real one.';
+  if (role === ROLES.ASSASSIN) return 'You know evil (except Oberon). Find and kill Merlin at the end.';
+  if (role === ROLES.MORGANA) return 'You appear as Merlin to Percival. Deceive him.';
+  if (role === ROLES.MORDRED) return 'You are hidden from Merlin. Stay covert.';
+  if (role === ROLES.OBERON) return 'You are isolated Evil — you see no one, no one sees you.';
+  if (role === ROLES.LOYAL) return 'Find Evil through voting and quests.';
+  return 'Sabotage quests. Hide among Good. Protect the Assassin.';
+}
+
+/**
+ * Quest vote modal — secret Success/Fail selection for team members.
+ * Good sees only Success (Fail disabled with tooltip).
+ */
+function showQuestVote({ playerName, isEvil, onSubmit }) {
+  const html = `
+    <div class="rounded-[20px] overflow-hidden border border-white/10 shadow-2xl bg-[#111827]">
+      <div class="px-6 py-4 border-b border-white/10">
+        <p class="text-[11px] tracking-[0.16em] font-semibold text-stone-400">SECRET QUEST VOTE</p>
+        <h2 class="font-display font-bold text-lg text-white mt-1">${escape(playerName)} — choose your card</h2>
+        <p class="text-xs text-stone-500 mt-1">Only you can see this. Make your play, then pass.</p>
+      </div>
+      <div class="p-6">
+        <div class="grid grid-cols-2 gap-4">
+          <button data-vote="SUCCESS" class="quest-card success group relative rounded-2xl border-2 border-white/10 bg-gradient-to-br from-cyan-900/30 to-blue-900/30 p-5 text-center hover:border-good/50">
+            <div class="w-12 h-12 mx-auto rounded-xl bg-good/20 border border-good/30 flex items-center justify-center text-xl">✓</div>
+            <p class="font-display font-extrabold tracking-wide text-white mt-3">SUCCESS</p>
+            <p class="text-xs text-stone-400 mt-1">Quest succeeds</p>
+            <div class="absolute inset-0 rounded-2xl pointer-events-none group-[.selected]:ring-2 group-[.selected]:ring-good"></div>
+          </button>
+          <button data-vote="FAIL" ${isEvil ? '' : 'disabled'} class="quest-card fail group relative rounded-2xl border-2 border-white/10 ${isEvil ? 'bg-gradient-to-br from-rose-900/30 to-red-900/30 hover:border-evil/50' : 'bg-white/[0.03] opacity-50 cursor-not-allowed'} p-5 text-center">
+            <div class="w-12 h-12 mx-auto rounded-xl ${isEvil ? 'bg-evil/20 border border-evil/30' : 'bg-white/10 border border-white/10'} flex items-center justify-center text-xl">✕</div>
+            <p class="font-display font-extrabold tracking-wide ${isEvil ? 'text-white' : 'text-stone-500'} mt-3">FAIL</p>
+            <p class="text-xs ${isEvil ? 'text-stone-400' : 'text-stone-600'} mt-1">${isEvil ? 'Sabotage quest' : 'Good must succeed'}</p>
+          </button>
+        </div>
+        ${!isEvil ? '<p class="mt-3 text-center text-xs text-amber-300/80">Loyal servants must play Success.</p>' : '<p class="mt-3 text-center text-xs text-stone-500">Evil may play either. Choose wisely — you stay hidden.</p>'}
+        <button id="btn-confirm-quest" disabled class="mt-5 w-full py-3.5 rounded-xl bg-white/10 text-stone-500 font-bold cursor-not-allowed transition-colors">Select a card</button>
+      </div>
+    </div>
+  `;
+  const { close } = createPortal(html);
+  let selected = null;
+  const btnConfirm = document.getElementById('btn-confirm-quest');
+  const cards = document.querySelectorAll('.quest-card');
+  cards.forEach(c => {
+    c.addEventListener('click', () => {
+      if (c.hasAttribute('disabled')) return;
+      cards.forEach(x => x.classList.remove('selected'));
+      c.classList.add('selected');
+      selected = c.dataset.vote;
+      btnConfirm.disabled = false;
+      btnConfirm.className = 'mt-5 w-full py-3.5 rounded-xl bg-gold text-obsidian font-bold hover:bg-amber-300 transition-colors shadow-lg shadow-gold/20';
+      btnConfirm.textContent = `PLAY ${selected}`;
+    });
+  });
+  btnConfirm.addEventListener('click', () => {
+    if (!selected) return;
+    close();
+    onSubmit(selected);
+  });
+  return { close };
+}
+
+/**
+ * Simple confirm modal for assassination, etc.
+ */
+function showConfirm({ title, body, confirmText = 'Confirm', cancelText = 'Cancel', onConfirm, variant = 'default' }) {
+  const html = `
+    <div class="rounded-2xl overflow-hidden border border-white/10 shadow-2xl bg-[#111827] p-6">
+      <h3 class="font-display font-bold text-lg text-white">${escape(title)}</h3>
+      <p class="text-sm text-stone-300 mt-2 leading-relaxed">${body}</p>
+      <div class="flex gap-3 mt-6">
+        <button data-cancel class="flex-1 py-3 rounded-xl bg-white/10 hover:bg-white/20 text-white font-semibold transition-colors">${escape(cancelText)}</button>
+        <button data-confirm class="flex-1 py-3 rounded-xl ${variant==='danger' ? 'bg-evil hover:bg-rose-600 text-white' : 'bg-gold hover:bg-amber-300 text-obsidian'} font-bold transition-colors">${escape(confirmText)}</button>
+      </div>
+    </div>
+  `;
+  const { close } = createPortal(html);
+  const portalEl = document.getElementById('modal-root').lastElementChild;
+  portalEl.querySelector('[data-cancel]').addEventListener('click', close);
+  portalEl.querySelector('[data-confirm]').addEventListener('click', () => { close(); onConfirm?.(); });
+  return { close };
+}
+
+function escape(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
 // ---- js/app.js ----
-
 /**
  * js/app.js — Core router (v3) — Distributed play (own phones) + Table Party lobby
  * Each player on own device sees private role, no passing.
  * Keeps pure reducer orchestration + backend abstraction via net.js
  */
-
-
-
-
-
-
-
-
 
 try { window.__AVALON_BOOTED__ = true; } catch(_) {}
 
@@ -2473,7 +2568,11 @@ let roomUnsub = null;
 let lobbyRoomCache = null; // for joiner view
 let lobbyPoll = null;
 let isJoinerMode = false;
-let hasJoined = false;
+let hasJoined = false; // joiner has already called joinRoom — show waiting not input
+let uiMode = 'HOME'; // HOME, JOIN_CODE, LOBBY
+let showGamePopup = false;
+let homeSearch = '';
+let joinCodeInput = '';
 
 function defaultLobby() {
   // Persist room code — don't generate new on every refresh
@@ -2530,6 +2629,7 @@ function startLobbyPoll() {
         const fetchedStr = JSON.stringify(room.players);
         const localStr = JSON.stringify(lobbyDraft.players.map((p,i)=>({id:`lobby_${i}_${p.name}`,name:p.name,isBot:!!p.isBot})));
         if (fetchedStr !== localStr) {
+          // Merge by name — host sees any joiner even if lengths equal but names differ
           if (!isJoinerMode) {
             const localNames = new Set(lobbyDraft.players.map(p=>p.name));
             let changed = false;
@@ -2762,12 +2862,15 @@ function render(){
   const app=document.getElementById('app'); if(!app) return;
   const loading=document.getElementById('loading'); if(loading) loading.remove();
   const pub=getPublicState(state);
-  // Toggle header / background for exact Table Party in-game look
+  // Toggle header / background — hide AVALON header for HOME/JOIN_CODE (they have own Table Party header) and for in-game
+  const isHomeLike = pub.phase===PHASES.LOBBY && (uiMode==='HOME' || uiMode==='JOIN_CODE') && !isJoinerMode;
   const headerEl = document.querySelector('header');
-  if (headerEl) headerEl.style.display = (pub.phase===PHASES.LOBBY) ? '' : 'none';
-  if (pub.phase===PHASES.LOBBY) {
+  if (headerEl) headerEl.style.display = (pub.phase===PHASES.LOBBY && !isHomeLike) ? '' : 'none';
+  if (pub.phase===PHASES.LOBBY && !isHomeLike) {
     document.body.className = document.body.className.replace('bg-[#0a1e2e]','').replace('bg-obsidian','bg-obsidian');
     document.body.style.backgroundColor = '';
+  } else if (isHomeLike) {
+    document.body.style.backgroundColor = '#0f0a1a';
   } else {
     document.body.style.backgroundColor = '#0a1e2e';
   }
@@ -2780,7 +2883,17 @@ function render(){
 
 function buildLayout(pub){
   if (pub.phase===PHASES.LOBBY) {
+    // — HOME / JOIN CODE takes precedence when not yet in a real lobby flow —
+    if (uiMode === 'JOIN_CODE') {
+      return renderJoinCodeScreen(joinCodeInput);
+    }
+    if (uiMode === 'HOME' && !isJoinerMode) {
+      let html = renderHome(homeSearch);
+      if (showGamePopup) html += renderGamePopup();
+      return html;
+    }
     const inviteLink = pub.roomCode ? net.generateInviteLink(pub.roomCode) : (lobbyDraft.inviteLink || (window.location.origin + window.location.pathname + '?room=' + lobbyDraft.roomCode));
+    // Joiner mode: show join screen with host's players from cache
     if (isJoinerMode && lobbyRoomCache && lobbyRoomCache.players) {
       const hostPlayers = lobbyRoomCache.players;
       const count = hostPlayers.length;
@@ -3498,6 +3611,88 @@ function renderGameOver(pub){
 }
 
 function bindDynamicEvents(pub){
+  // — HOME (Pick a game) and JOIN_CODE intercept — must be before lobby bindings —
+  if (pub.phase===PHASES.LOBBY && uiMode==='HOME' && !isJoinerMode) {
+    document.getElementById('input-home-search')?.addEventListener('input', (e)=>{
+      homeSearch = e.target.value;
+      // live filter without full re-render to keep focus
+      const q = homeSearch.toLowerCase().trim();
+      document.querySelectorAll('[data-game-id]').forEach(card=>{
+        const title = card.dataset.gameId || '';
+        const text = card.textContent.toLowerCase();
+        const show = !q || text.includes(q) || title.includes(q);
+        card.style.display = show ? '' : 'none';
+      });
+      const countEl = document.querySelector('#home-games-count');
+      if (countEl) {
+        const visible = Array.from(document.querySelectorAll('[data-game-id]')).filter(c=> c.style.display!=='none').length;
+        countEl.textContent = visible + ' games';
+      }
+    });
+    document.getElementById('btn-home-join-banner')?.addEventListener('click', ()=>{
+      uiMode='JOIN_CODE'; joinCodeInput=''; queueRender();
+    });
+    document.querySelectorAll('[data-game-id]')?.forEach(el=>{
+      el.addEventListener('click', ()=>{
+        if (el.dataset.gameId==='quest-of-shadows') { showGamePopup=true; queueRender(); }
+        else toast('Coming soon','default');
+      });
+    });
+    document.getElementById('btn-popup-close')?.addEventListener('click', ()=>{ showGamePopup=false; queueRender(); });
+    document.getElementById('game-popup-overlay')?.addEventListener('click', (e)=>{
+      if (e.target.id==='game-popup-overlay') { showGamePopup=false; queueRender(); }
+    });
+    document.getElementById('btn-popup-play')?.addEventListener('click', async ()=>{
+      const newCode = generateRoomCode();
+      persistLobbyCode(newCode);
+      lobbyDraft = { roomCode: newCode, players: [{ name: 'Lucky', isBot: false }], extraRoles: { percival: true, morgana: true, mordred: false, oberon: false } };
+      saveLobbyDraft();
+      try { await syncLobbyToServer(); } catch(_){}
+      uiMode='LOBBY'; showGamePopup=false; queueRender();
+      toast('Room ' + newCode + ' created','success');
+    });
+    document.getElementById('btn-popup-howto')?.addEventListener('click', ()=>{
+      showGamePopup=false; queueRender();
+      document.getElementById('rules-dialog')?.showModal();
+    });
+    document.getElementById('btn-popup-join')?.addEventListener('click', ()=>{
+      showGamePopup=false; uiMode='JOIN_CODE'; joinCodeInput=''; queueRender();
+    });
+    return;
+  }
+  if (pub.phase===PHASES.LOBBY && uiMode==='JOIN_CODE') {
+    const inp = document.getElementById('input-join-code');
+    const btn = document.getElementById('btn-join-enter');
+    const err = document.getElementById('join-code-error');
+    const disp = document.getElementById('join-code-display');
+    inp?.addEventListener('input', (e)=>{
+      let v = e.target.value.toUpperCase().replace(/[^A-Z]/g,'').slice(0,4);
+      joinCodeInput = v;
+      e.target.value = v;
+      if (disp) {
+        disp.innerHTML = v ? v.split('').map(ch=> `<span>${escape(ch)}</span>`).join('<span class="w-1"></span>') : '<span class="text-white/20 tracking-[0.6em]">----</span>';
+      }
+      if (btn) btn.disabled = v.length!==4;
+      if (err) err.textContent = '';
+    });
+    inp?.addEventListener('keydown', (e)=>{
+      if (e.key==='Enter' && joinCodeInput.length===4) {
+        e.preventDefault();
+        window.location.href = window.location.pathname + '?room=' + joinCodeInput;
+      }
+    });
+    // auto-focus
+    setTimeout(()=> inp?.focus(), 50);
+    document.getElementById('btn-join-back')?.addEventListener('click', ()=>{
+      uiMode='HOME'; joinCodeInput=''; queueRender();
+    });
+    btn?.addEventListener('click', ()=>{
+      const code = joinCodeInput.trim().toUpperCase();
+      if (!isValidRoomCode(code)) { if (err) err.textContent='Enter 4 letters A-Z'; return; }
+      window.location.href = window.location.pathname + '?room=' + code;
+    });
+    return;
+  }
   // Lobby Table Party events
   if (pub.phase===PHASES.LOBBY) {
     document.getElementById('btn-share-link')?.addEventListener('click', async (e)=>{
@@ -3522,6 +3717,7 @@ function bindDynamicEvents(pub){
         setMyId(lobbyDraft.roomCode, myId);
         try { localStorage.setItem('avalon:myName:'+lobbyDraft.roomCode, name); } catch(_){}
         hasJoined = true;
+        // Keep isJoinerMode true so joiner stays on waiting screen until host starts
         toast('Joined ' + lobbyDraft.roomCode + ' as ' + name + ' — waiting for host', 'success');
         lobbyRoomCache = await net.getRoomAsync(lobbyDraft.roomCode);
         queueRender();
@@ -3573,12 +3769,13 @@ function bindDynamicEvents(pub){
       const p=document.getElementById('panel-extra-roles');
       if(p) p.classList.toggle('hidden');
     });
-    document.getElementById('btn-lobby-back')?.addEventListener('click', ()=>{ toast('Back', 'default'); });
+    document.getElementById('btn-lobby-back')?.addEventListener('click', ()=>{ uiMode='HOME'; showGamePopup=false; queueRender(); });
     document.getElementById('btn-lobby-help')?.addEventListener('click', ()=>{ document.getElementById('rules-dialog')?.showModal(); });
-    document.getElementById('btn-change-game')?.addEventListener('click', ()=>{ toast('Quest of Shadows — more games soon', 'default'); });
+    document.getElementById('btn-change-game')?.addEventListener('click', ()=>{ uiMode='HOME'; showGamePopup=false; queueRender(); });
 
     document.getElementById('btn-start')?.addEventListener('click', async ()=>{
       try {
+        // Fetch latest room to include any joiners — union by name to avoid losing bots or joiners
         let latestPlayers = lobbyDraft.players.slice();
         try {
           const room = await net.getRoomAsync(lobbyDraft.roomCode);
@@ -3588,10 +3785,12 @@ function bindDynamicEvents(pub){
             for (const p of serverPlayers) {
               if (!seen.has(p.name)) { latestPlayers.push({ name: p.name, isBot: !!p.isBot }); seen.add(p.name); }
             }
+            // If we added any server players not in local, persist
             if (latestPlayers.length !== lobbyDraft.players.length) {
               lobbyDraft.players = latestPlayers.slice();
               saveLobbyDraft();
             }
+            // If local had players server missed (e.g., bots added just before start), push union back
             const serverNames = new Set(serverPlayers.map(p=>p.name));
             const hasLocalOnly = latestPlayers.some(p=> !serverNames.has(p.name));
             if (hasLocalOnly) {
@@ -3619,6 +3818,7 @@ function bindDynamicEvents(pub){
           await net.createRoom(lobbyDraft.roomCode, players[0]);
           const roomPlayers = players.map(p=>({id:p.id, name:p.name, isBot:p.isBot}));
           await net.pushRoom(lobbyDraft.roomCode, { players: roomPlayers, state, hostId: players[0].id });
+          // Host must also subscribe to game updates (so it sees joiner votes)
           stopLobbyPoll();
           if (roomUnsub) try{ roomUnsub(); }catch(_){}
           roomUnsub = net.subscribe(lobbyDraft.roomCode, (msg)=>{
@@ -3629,6 +3829,7 @@ function bindDynamicEvents(pub){
               if (state.phase===PHASES.QUEST_VOTE) onEnterQuestVote();
             }
           });
+          // Persist that host has started, so joiner's isJoinerMode stays correct
           hasJoined = false;
           isJoinerMode = false;
         } catch(e){ console.warn('[createRoom]', e); }
@@ -3910,13 +4111,18 @@ async function init(){
     }
   }
   isJoinerMode = isJoiner;
+  // Determine uiMode — HOME when no invite, LOBBY when invite present or already in lobby
+  if (inviteCode) uiMode = 'LOBBY';
+  else uiMode = 'HOME';
+  // Determine if joiner already joined (for waiting screen)
   if (isJoiner) {
     try {
       const myName = localStorage.getItem('avalon:myName:'+lobbyDraft.roomCode);
       if (myName && lobbyRoomCache && lobbyRoomCache.players && lobbyRoomCache.players.some(p=>p.name===myName)) hasJoined = true;
     } catch(_){}
   }
-  if (!isJoiner && lobbyDraft.roomCode) {
+  // If host (not joiner) and in lobby mode, sync lobby to server so joiners can find it — await so joiner sees it
+  if (!isJoiner && lobbyDraft.roomCode && uiMode==='LOBBY') {
     try { await syncLobbyToServer(); } catch(_){}
     startLobbyPoll();
   } else if (isJoiner) {
@@ -4000,6 +4206,4 @@ async function init(){
 }
 
 init();
-
-
 })();
