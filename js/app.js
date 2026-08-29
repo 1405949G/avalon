@@ -74,7 +74,7 @@ async function syncLobbyToServer() {
   // Push to server for cross-device joiners
   try {
     const roomPlayers = lobbyDraft.players.map((p,i)=> ({ id: `lobby_${i}_${p.name}`, name: p.name, isBot: !!p.isBot }));
-    await net.pushRoom(lobbyDraft.roomCode, { players: roomPlayers, state: null, hostId: roomPlayers[0]?.id || null });
+    await net.pushRoom(lobbyDraft.roomCode, { players: roomPlayers, state: null, hostId: roomPlayers[0]?.id || null, extraRoles: lobbyDraft.extraRoles });
   } catch(e){ console.warn('[syncLobby]', e); }
 }
 function startLobbyPoll() {
@@ -102,7 +102,8 @@ function startLobbyPoll() {
       if (room && room.players) {
         const fetchedStr = JSON.stringify(room.players);
         const localStr = JSON.stringify(lobbyDraft.players.map((p,i)=>({id:`lobby_${i}_${p.name}`,name:p.name,isBot:!!p.isBot})));
-        if (fetchedStr !== localStr) {
+        let playersChanged = fetchedStr !== localStr;
+        if (playersChanged) {
           // Merge by name — host sees any joiner even if lengths equal but names differ
           if (!isJoinerMode) {
             const localNames = new Set(lobbyDraft.players.map(p=>p.name));
@@ -124,14 +125,25 @@ function startLobbyPoll() {
             }
             if (changed) saveLobbyDraft();
           }
-          lobbyRoomCache = room;
-          // Avoid clobbering typing — don't re-render while user is typing in lobby inputs
-          const active = document.activeElement;
-          const isTyping = active && (active.id==='input-add-player' || active.id==='input-join-name' || active.id==='input-home-search' || active.tagName==='INPUT');
-          if (!isTyping) queueRender();
-        } else {
-          lobbyRoomCache = room;
         }
+        // Sync extraRoles for joiners (host is source of truth)
+        let extraChanged = false;
+        if (room.extraRoles && typeof room.extraRoles === 'object') {
+          const roomExtraStr = JSON.stringify(room.extraRoles);
+          const localExtraStr = JSON.stringify(lobbyDraft.extraRoles);
+          if (roomExtraStr !== localExtraStr) {
+            if (isJoinerMode) {
+              lobbyDraft.extraRoles = { percival: !!room.extraRoles.percival, morgana: !!room.extraRoles.morgana, mordred: !!room.extraRoles.mordred, oberon: !!room.extraRoles.oberon };
+              saveLobbyDraft();
+              extraChanged = true;
+            }
+          }
+        }
+        lobbyRoomCache = room;
+        // Avoid clobbering typing — don't re-render while user is typing in lobby inputs
+        const active = document.activeElement;
+        const isTyping = active && (active.id==='input-add-player' || active.id==='input-join-name' || active.id==='input-home-search' || active.tagName==='INPUT');
+        if ((playersChanged || extraChanged) && !isTyping) queueRender();
         // Also if room has state (game started), host should transition
         if (room.state && room.state.phase !== PHASES.LOBBY && state.phase === PHASES.LOBBY) {
           // Game started by host — joiner should load it
@@ -139,16 +151,27 @@ function startLobbyPoll() {
           if (incoming && incoming.phase && PHASES[incoming.phase]) {
             state = incoming;
             storage.save(state);
-            // Set myId for joiner if not set
-            if (isJoinerMode && !myId) {
-              const myKey = 'avalon:myId:' + lobbyDraft.roomCode;
-              let v=null; try{ v=localStorage.getItem(myKey);}catch(_){}
-              if (!v) {
-                // Try to find player with same name as entered join name
-                const joinName = document.getElementById('input-join-name')?.value?.trim() || lobbyDraft.players[0]?.name;
-                const found = incoming.players.find(p=> p.name===joinName);
+            // Set myId for joiner — map by stored name, not stale lobbyDraft
+            if (isJoinerMode) {
+              let storedId = null; try{ storedId = localStorage.getItem('avalon:myId:' + lobbyDraft.roomCode); }catch(_){}
+              let storedName = null; try{ storedName = localStorage.getItem('avalon:myName:' + lobbyDraft.roomCode); }catch(_){}
+              const idValid = storedId && incoming.players.some(p=>p.id===storedId);
+              if (idValid) {
+                myId = storedId;
+              } else if (storedName) {
+                const found = incoming.players.find(p=> p.name===storedName);
                 if (found) { myId = found.id; setMyId(lobbyDraft.roomCode, myId); }
-                else myId = incoming.players[0]?.id;
+                else if (!myId) myId = incoming.players[0]?.id;
+              } else {
+                const fallbackName = (()=>{ try{ const v = document.getElementById('input-join-name')?.value?.trim(); if(v) return v; }catch(_){} return null; })();
+                if (fallbackName) {
+                  const found = incoming.players.find(p=>p.name===fallbackName);
+                  if (found) { myId = found.id; setMyId(lobbyDraft.roomCode, myId); }
+                }
+                if (!myId || !incoming.players.some(p=>p.id===myId)) {
+                  myId = incoming.players[0]?.id;
+                  if (myId) setMyId(lobbyDraft.roomCode, myId);
+                }
               }
             }
             // Subscribe to game updates
@@ -395,10 +418,11 @@ function buildLayout(pub){
       const isAlreadyJoined = hasJoined || (joinedName && hostPlayers.some(p=> p.name===joinedName));
       if (isAlreadyJoined) {
         // Joiner sees same lobby as host but limited (can only edit own name)
+        const effectiveExtra = (lobbyRoomCache && lobbyRoomCache.extraRoles) ? lobbyRoomCache.extraRoles : lobbyDraft.extraRoles;
         const ctx = {
           roomCode: lobbyDraft.roomCode,
           playersDraft: hostPlayers.map(p=> ({name:p.name, isBot:p.isBot})),
-          extraRoles: pub.extraRoles && Object.keys(pub.extraRoles).length ? pub.extraRoles : lobbyDraft.extraRoles,
+          extraRoles: effectiveExtra,
           myName: joinedName,
           inviteLink: net.generateInviteLink(lobbyDraft.roomCode),
           isJoiner: true,
@@ -438,7 +462,7 @@ function buildLayout(pub){
     const ctx = {
       roomCode: pub.roomCode || lobbyDraft.roomCode,
       playersDraft: state.players.length ? state.players.map(p=>({name:p.name, isBot:p.isBot})) : lobbyDraft.players,
-      extraRoles: pub.extraRoles && Object.keys(pub.extraRoles).length ? pub.extraRoles : lobbyDraft.extraRoles,
+      extraRoles: lobbyDraft.extraRoles,
       myName: lobbyDraft.players[0]?.name || 'Lucky',
       inviteLink,
     };
@@ -452,22 +476,14 @@ function buildLayout(pub){
       try {
         const mapRaw = localStorage.getItem('avalon:nameToId:'+ (pub.roomCode||lobbyDraft.roomCode));
         const map = mapRaw ? JSON.parse(mapRaw) : null;
-        const myName = (()=>{ try{ return localStorage.getItem('avalon:myName:'+ (pub.roomCode||'')) || lobbyDraft.players[0]?.name; }catch(_){ return null; }})();
+        const myName = (()=>{ try{ const v = localStorage.getItem('avalon:myName:'+ (pub.roomCode||'')); if(v) return v; }catch(_){} try{ const v2 = document.getElementById('input-join-name')?.value?.trim(); if(v2) return v2; }catch(_){} return lobbyDraft.players[0]?.name || null; })();
         if (map && myName && map[myName]) { my = map[myName]; setMyId(pub.roomCode||lobbyDraft.roomCode, my); myId = my; }
         else {
-          // Fallback to first matching name
-          const localName = lobbyDraft.players[0]?.name || (()=>{
-            try{
-              const v = document.getElementById('input-join-name')?.value?.trim();
-              if(v) return v;
-            }catch(_){}
-            return null;
-          })();
-          const found = localName ? state.players.find(p=>p.name===localName) : null;
+          const found = myName ? state.players.find(p=>p.name===myName) : null;
           if (found) { my = found.id; setMyId(pub.roomCode||lobbyDraft.roomCode, my); myId = my; }
-          else { my = state.players[0]?.id; myId = my; }
+          else { my = state.players[0]?.id; myId = my; if(my) setMyId(pub.roomCode||lobbyDraft.roomCode, my); }
         }
-      } catch(_){ my = state.players[0]?.id; myId = my; }
+      } catch(_){ my = state.players[0]?.id; myId = my; if(my) try{ setMyId(pub.roomCode||lobbyDraft.roomCode, my); }catch(_){} }
     }
     const myIdx = state.players.findIndex(p=>p.id===my);
     const myRevealed = myIdx!==-1 ? state.revealed[myIdx] : false;
@@ -596,8 +612,8 @@ function buildLayout(pub){
             const sel = selectedTeam.includes(p.id);
             const border = sel ? 'border-[#7ec8e6] bg-[#7ec8e6]/15' : 'border-white/10 bg-white/5';
             return `<button data-player-id="${p.id}" class="flex flex-col items-center gap-1 p-2 rounded-2xl border-2 ${border} transition-colors">
-              <div class="w-12 h-12 rounded-full ${p.id===my?'bg-[#f3ecd8] text-black':'bg-[#ff6b6b] text-black'} flex items-center justify-center font-black text-sm">${escape(p.name.slice(0,2).toUpperCase())}</div>
-              <span class="text-xs font-bold text-white/70">${escape(p.name.slice(0,7))}${p.id===my?'<span class="ml-1 px-1 py-0.5 rounded-full bg-[#f3ecd8] text-black text-[8px]">YOU</span>':''}</span>
+              <div class="w-12 h-12 rounded-full ${p.id===my?'bg-[#f3ecd8] text-[#0a1e2e]':'bg-[#ff6b6b] text-black'} flex items-center justify-center font-black text-sm">${escape(p.name.slice(0,2).toUpperCase())}</div>
+              <span class="text-xs font-bold text-white/70">${escape(p.name.slice(0,7))}${p.id===my?'<span class="ml-1 px-1 py-0.5 rounded-full bg-[#f3ecd8] text-[#0a1e2e] text-[8px] border border-[#0a1e2e]/10">YOU</span>':''}</span>
             </button>`;
           }).join('')}
         </div>
@@ -653,7 +669,7 @@ function buildLayout(pub){
             <div class="flex justify-center gap-3 mt-4">
               ${teamIds.map(id=>{
                 const p = pub.players.find(x=>x.id===id);
-                return `<div class="flex flex-col items-center"><div class="w-14 h-14 rounded-full bg-[#ff6b6b] flex items-center justify-center font-black text-black">${escape((p?.name||'??').slice(0,2).toUpperCase())}</div><span class="text-xs font-bold text-white mt-1">${escape(p?.name||'??')}${id===my?'<span class="ml-1 px-1 py-0.5 rounded-full bg-[#f3ecd8] text-black text-[8px]">YOU</span>':''}</span></div>`;
+                return `<div class="flex flex-col items-center"><div class="w-14 h-14 rounded-full bg-[#ff6b6b] flex items-center justify-center font-black text-black">${escape((p?.name||'??').slice(0,2).toUpperCase())}</div><span class="text-xs font-bold text-white mt-1">${escape(p?.name||'??')}${id===my?'<span class="ml-1 px-1 py-0.5 rounded-full bg-[#f3ecd8] text-[#0a1e2e] text-[8px] border border-[#0a1e2e]/10">YOU</span>':''}</span></div>`;
               }).join('')}
             </div>
           </div>
@@ -684,7 +700,7 @@ function buildLayout(pub){
           <h2 class="font-display font-black text-[28px] text-white leading-none">Play your card</h2>
           <p class="text-sm text-white/60 mt-1 max-w-[320px] mx-auto">The fail card is not yours to play. A loyal servant only ever succeeds.</p>
           <div class="flex justify-center gap-2 mt-4">
-            ${teamIds.map(id=>{ const p=pub.players.find(x=>x.id===id); return `<div class="flex flex-col items-center"><div class="w-12 h-12 rounded-full ${id===my?'bg-[#f3ecd8] text-black':'bg-[#ff6b6b] text-black'} flex items-center justify-center font-black text-sm">${escape((p?.name||'??').slice(0,2))}</div><span class="text-xs font-bold text-white/70 mt-1">${escape(p?.name||'??')}${id===my?'<span class="ml-1 px-1 py-0.5 rounded-full bg-[#f3ecd8] text-black text-[8px]">YOU</span>':''}</span></div>`;}).join('')}
+            ${teamIds.map(id=>{ const p=pub.players.find(x=>x.id===id); return `<div class="flex flex-col items-center"><div class="w-12 h-12 rounded-full ${id===my?'bg-[#f3ecd8] text-[#0a1e2e]':'bg-[#ff6b6b] text-black'} flex items-center justify-center font-black text-sm">${escape((p?.name||'??').slice(0,2))}</div><span class="text-xs font-bold text-white/70 mt-1">${escape(p?.name||'??')}${id===my?'<span class="ml-1 px-1 py-0.5 rounded-full bg-[#f3ecd8] text-[#0a1e2e] text-[8px] border border-[#0a1e2e]/10">YOU</span>':''}</span></div>`;}).join('')}
           </div>
           <p class="text-xs text-white/40 mt-2">${Object.keys(state.questVotes).length} of ${teamIds.length} played.</p>
         </div>
@@ -735,7 +751,7 @@ function buildLayout(pub){
             const p = pub.players.find(x=>x.id===id);
             const sel = selectedTeam.includes(id); // reuse for assassin pick
             return `<button data-assassinate="${id}" class="flex flex-col items-center gap-1 p-1 rounded-2xl border-2 ${sel?'border-[#7ec8e6] bg-[#7ec8e6]/10':'border-transparent'}">
-              <div class="w-14 h-14 rounded-full ${p?.id===my?'bg-[#f3ecd8] text-black':'bg-[#2a3a4a] text-white'} border-2 border-white/10 flex items-center justify-center font-black">${escape((p?.name||'??').slice(0,2))}</div>
+              <div class="w-14 h-14 rounded-full ${p?.id===my?'bg-[#f3ecd8] text-[#0a1e2e]':'bg-[#2a3a4a] text-white'} border-2 border-white/10 flex items-center justify-center font-black">${escape((p?.name||'??').slice(0,2))}</div>
               <span class="text-xs font-bold text-white/70">${escape(p?.name||'??')}</span>
             </button>`;
           }).join('')}
@@ -767,8 +783,8 @@ function buildLayout(pub){
             ${state.players.map(p=>`
               <div class="flex items-center justify-between rounded-xl bg-[#0f2231]/80 border-l-4 ${p.allegiance==='GOOD'?'border-emerald-400':'border-rose-400'} border-y border-r border-white/5 px-3 py-2.5">
                 <div class="flex items-center gap-2.5">
-                  <div class="w-8 h-8 rounded-full ${p.id===my?'bg-[#f3ecd8] text-black':'bg-[#ff6b6b] text-black'} flex items-center justify-center font-black text-xs">${escape(p.name.slice(0,2))}</div>
-                  <span class="text-sm font-bold text-white">${escape(p.name)}${p.id===my?'<span class="ml-1 px-1.5 py-0.5 rounded-full bg-[#f3ecd8] text-black text-[8px]">YOU</span>':''}</span>
+                  <div class="w-8 h-8 rounded-full ${p.id===my?'bg-[#f3ecd8] text-[#0a1e2e]':'bg-[#ff6b6b] text-black'} flex items-center justify-center font-black text-xs">${escape(p.name.slice(0,2))}</div>
+                  <span class="text-sm font-bold text-white">${escape(p.name)}${p.id===my?'<span class="ml-1 px-1.5 py-0.5 rounded-full bg-[#f3ecd8] text-[#0a1e2e] text-[8px] border border-[#0a1e2e]/10">YOU</span>':''}</span>
                 </div>
                 <span class="text-xs font-bold ${p.allegiance==='GOOD'?'text-emerald-300':'text-rose-300'}">${escape(p.role)}</span>
               </div>
@@ -1272,7 +1288,6 @@ function bindDynamicEvents(pub){
               <button id="avatar-edit-cancel" class="py-3 rounded-xl bg-white/10 hover:bg-white/15 border border-white/10 text-white font-semibold">Cancel</button>
               <button id="avatar-edit-save" class="py-3 rounded-xl bg-[#7ec8e6] hover:bg-[#a0d8f0] text-[#0a1e2e] font-black">Save</button>
             </div>
-            ${lobbyDraft.players.length>1 ? `<button id="avatar-edit-kick" class="mt-3 w-full py-2.5 rounded-xl bg-evil/15 hover:bg-evil/25 border border-evil/20 text-evil text-sm font-bold">Kick player</button>` : ''}
           </div>
         `;
         document.body.appendChild(overlay);
@@ -1287,11 +1302,6 @@ function bindDynamicEvents(pub){
           if (lobbyDraft.players.some((x,i)=> i!==idx && x.name.toLowerCase()===next.toLowerCase())) return toast('Name already taken','error');
           lobbyDraft.players[idx].name=next;
           saveLobbyDraft(); syncLobbyToServer(); close(); queueRender();
-        });
-        overlay.querySelector('#avatar-edit-kick')?.addEventListener('click', ()=>{
-          const name=lobbyDraft.players[idx]?.name||'Player';
-          close();
-          showConfirm({ title:'Kick player?', body:`Remove <span class="text-white font-bold">${escape(name)}</span> from lobby?`, confirmText:'Kick', variant:'danger', onConfirm:()=>{ lobbyDraft.players.splice(idx,1); saveLobbyDraft(); syncLobbyToServer(); queueRender(); }});
         });
         inp2?.addEventListener('keydown', (e)=>{ if(e.key==='Enter') overlay.querySelector('#avatar-edit-save')?.click(); if(e.key==='Escape') close(); });
       });
@@ -1754,12 +1764,22 @@ async function init(){
       if (!state.phase || !PHASES[state.phase]) throw new Error('Invalid phase');
       if (!state.log) state.log=[];
       if (!state.extraRoles) state.extraRoles={ percival:true, morgana:true, mordred:false, oberon:false };
-      // Restore myId
+      // Restore myId — map by stored name to handle id rotation after host recreates
       const code = state.roomCode || lobbyDraft.roomCode;
       if (code) {
         const key='avalon:myId:'+code;
         try { myId=localStorage.getItem(key); } catch(_){}
-        if (!myId || !state.players.some(p=>p.id===myId)) myId=state.players[0]?.id || null;
+        let storedName=null; try{ storedName=localStorage.getItem('avalon:myName:'+code); }catch(_){}
+        if (!myId || !state.players.some(p=>p.id===myId)) {
+          if (storedName) {
+            const found=state.players.find(p=>p.name===storedName);
+            if(found){ myId=found.id; try{localStorage.setItem(key, myId);}catch(_){} }
+            else myId=state.players[0]?.id || null;
+          } else {
+            myId=state.players[0]?.id || null;
+            if(myId) try{localStorage.setItem(key, myId);}catch(_){}
+          }
+        }
         lobbyDraft.roomCode=code;
         lobbyDraft.extraRoles = state.extraRoles;
         // Subscribe to room updates

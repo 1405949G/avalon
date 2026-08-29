@@ -131,11 +131,16 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     merged_state = incoming_state
             elif incoming_state is None and existing_state is not None:
                 merged_state = existing_state
+            # Merge extraRoles — host is source of truth; incoming wins if present
+            incoming_extra = data.get("extraRoles", None)
+            existing_extra = existing.get("extraRoles", None)
+            merged_extra = incoming_extra if incoming_extra is not None else existing_extra
             room = {
                 "code": code,
                 "players": merged_players,
                 "state": merged_state,
                 "hostId": data.get("hostId", existing.get("hostId", None)),
+                "extraRoles": merged_extra,
                 "createdAt": existing.get("createdAt", data.get("createdAt", 0)) or __import__('time').time()*1000,
                 "updatedAt": __import__('time').time()*1000,
             }

@@ -105,11 +105,16 @@ export async function onRequestPost({ request, params, env }) {
     } else if (body.state === undefined && existing && existing.state) {
       mergedState = existing.state;
     }
+    // Merge extraRoles — host is source of truth; incoming wins if present
+    let mergedExtra = null;
+    if (body.extraRoles !== undefined) mergedExtra = body.extraRoles;
+    else if (existing && existing.extraRoles !== undefined) mergedExtra = existing.extraRoles;
     const room = {
       code,
       players: mergedPlayers,
       state: mergedState,
       hostId: body.hostId || (existing ? existing.hostId : null),
+      extraRoles: mergedExtra,
       createdAt: body.createdAt || (existing ? existing.createdAt : Date.now()),
       updatedAt: Date.now(),
     };

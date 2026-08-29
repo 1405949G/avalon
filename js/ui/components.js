@@ -165,21 +165,21 @@ export function renderLobby(ctx) {
     const color = isYou ? 'border-emerald-400' : 'border-white/15';
     const bg = isYou ? 'bg-gradient-to-br from-amber-200 to-orange-100' : 'bg-gradient-to-br from-slate-600 to-slate-700';
     const botBadge = p.isBot ? '<span class="absolute -bottom-1 -right-1 px-1 py-0 rounded-full bg-white/90 text-[8px] font-extrabold text-black border border-white">BOT</span>' : '';
-    const youBadge = isYou ? '<span class="absolute -bottom-2 left-1/2 -translate-x-1/2 px-2 py-0.5 rounded-full bg-white text-obsidian text-[9px] font-extrabold tracking-widest">YOU</span>' : '';
-    const canKick = !isJoiner && players.length > 1;
+    const youBadge = isYou ? '<span class="absolute -bottom-2 left-1/2 -translate-x-1/2 px-2 py-0.5 rounded-full bg-[#f3ecd8] text-[#0a1e2e] text-[9px] font-extrabold tracking-widest">YOU</span>' : '';
+    const canKick = !isJoiner && players.length > 1 && !isYou;
     const canEdit = isJoiner ? p.name===joinedName : (p.isBot || i===0);
     const editAttr = canEdit ? `data-edit-idx="${i}"` : '';
     const kickBtn = canKick ? `<button data-kick-idx="${i}" class="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-black/70 hover:bg-evil border border-white/20 flex items-center justify-center text-white text-[9px] leading-none opacity-90 hover:opacity-100 transition-opacity" title="Kick">✕</button>` : '';
     return `
       <div class="flex flex-col items-center gap-1.5 relative group">
-        <div ${editAttr} class="relative w-[56px] h-[56px] sm:w-[60px] sm:h-[60px] rounded-full border-2 ${color} ${bg} flex items-center justify-center text-lg font-extrabold text-white shadow-md ${canEdit?'cursor-pointer hover:scale-105':'cursor-default'} transition-transform">
+        <div ${editAttr} class="relative w-[56px] h-[56px] sm:w-[60px] sm:h-[60px] rounded-full border-2 ${color} ${bg} flex items-center justify-center text-lg font-extrabold ${isYou ? 'text-[#0a1e2e]' : 'text-white'} shadow-md ${canEdit?'cursor-pointer hover:scale-105':'cursor-default'} transition-transform">
           ${p.name ? escape(p.name[0].toUpperCase()) : '?'}
           ${botBadge}
           ${kickBtn}
         </div>
         <div class="flex flex-col items-center leading-none">
           <span class="text-xs font-bold text-white truncate max-w-[64px] text-center">${escape(p.name || 'Player')}</span>
-          ${isYou?'<span class="mt-1 px-2 py-0.5 rounded-full bg-white text-obsidian text-[8px] font-black tracking-wide leading-none">YOU</span>':''}
+          ${isYou?'<span class="mt-1 px-2 py-0.5 rounded-full bg-[#f3ecd8] text-[#0a1e2e] text-[8px] font-black tracking-wide leading-none border border-[#0a1e2e]/10">YOU</span>':''}
         </div>
         ${isYou ? '<span class="w-1.5 h-1.5 rounded-full bg-emerald-400 absolute top-0 right-1 border-2 border-[#0e2533]"></span>' : ''}
       </div>
@@ -486,7 +486,7 @@ export function renderExactAvatarRow(pub, myId, statusMap) {
     const isYou = p.id===myId;
     const status = statusMap ? (statusMap[p.id] || (pub.revealed && pub.revealed[pub.players.findIndex(x=>x.id===p.id)] ? 'READY' : 'READING')) : 'READY';
     const isReady = status==='READY';
-    const bg = isYou ? 'bg-[#f3ecd8] text-[#0e2533]' : (p.isBot ? 'bg-[#ff6b6b] text-black' : 'bg-[#2a3a4a] text-white/60');
+    const bg = isYou ? 'bg-[#f3ecd8] text-black' : (p.isBot ? 'bg-[#ff6b6b] text-black' : 'bg-[#2a3a4a] text-white/60');
     const initials = escape((p.name||'??').slice(0,2).toUpperCase());
     const border = isReady ? 'border-emerald-400' : 'border-white/15';
     const dot = isReady ? '<span class="absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-emerald-500 border-2 border-[#0a1e2e] flex items-center justify-center text-[10px] text-white">✓</span>' : '';
@@ -498,7 +498,7 @@ export function renderExactAvatarRow(pub, myId, statusMap) {
         </div>
         <div class="flex flex-col items-center leading-none">
           <span class="text-xs font-bold ${isYou?'text-white':'text-white/70'} truncate max-w-[72px] text-center">${escape(p.name)}</span>
-          ${isYou?'<span class="mt-1 px-2 py-0.5 rounded-full bg-[#f3ecd8] text-[#0e2533] text-[8px] font-black leading-none tracking-wide">YOU</span>':''}
+          ${isYou?'<span class="mt-1 px-2 py-0.5 rounded-full bg-[#f3ecd8] text-[#0a1e2e] text-[8px] font-black leading-none tracking-wide border border-[#0a1e2e]/10">YOU</span>':''}
         </div>
         <span class="text-[10px] font-black tracking-widest ${isReady?'text-emerald-400':'text-white/30'}">${status}</span>
       </div>
