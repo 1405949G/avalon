@@ -82,12 +82,16 @@ export async function onRequestPost({ request, params, env }) {
     } else {
       existing = MEM.get(code) || null;
     }
-    // Merge players by name union
+    // Merge players — handle kicks vs adds
     let mergedPlayers = Array.isArray(body.players) ? body.players.slice(0,10) : null;
     if (existing && Array.isArray(existing.players) && mergedPlayers) {
-      const seen = new Set(mergedPlayers.map(p=>p.name));
-      for (const p of existing.players) {
-        if (!seen.has(p.name) && mergedPlayers.length < 10) { mergedPlayers.push(p); seen.add(p.name); }
+      if (mergedPlayers.length < existing.players.length) {
+        // Kick — incoming is authoritative, don't re-add
+      } else {
+        const seen = new Set(mergedPlayers.map(p=>p.name));
+        for (const p of existing.players) {
+          if (!seen.has(p.name) && mergedPlayers.length < 10) { mergedPlayers.push(p); seen.add(p.name); }
+        }
       }
     } else if (!mergedPlayers && existing && Array.isArray(existing.players)) {
       mergedPlayers = existing.players;

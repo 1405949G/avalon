@@ -87,12 +87,16 @@ export async function pushRoom(code, roomData) {
     // If pushing only players (lobby) and base has state, keep state
     mergedState = base.state;
   }
-  // Merge players by name union (lobby)
+  // Merge players — handle adds (union) and kicks (incoming authoritative when smaller)
   let mergedPlayers = roomData.players;
   if (Array.isArray(base.players) && Array.isArray(roomData.players)) {
-    const seen = new Set(roomData.players.map(p=>p.name));
-    const extra = base.players.filter(p=> !seen.has(p.name));
-    if (extra.length) mergedPlayers = [...roomData.players, ...extra];
+    if (roomData.players.length < base.players.length) {
+      mergedPlayers = roomData.players; // kick — don't re-add removed
+    } else {
+      const seen = new Set(roomData.players.map(p=>p.name));
+      const extra = base.players.filter(p=> !seen.has(p.name));
+      if (extra.length) mergedPlayers = [...roomData.players, ...extra];
+    }
   } else if (!mergedPlayers && base.players) {
     mergedPlayers = base.players;
   }

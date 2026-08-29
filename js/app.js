@@ -381,8 +381,9 @@ function buildLayout(pub){
       return renderJoinCodeScreen(joinCodeInput);
     }
     if (uiMode === 'HOME' && !isJoinerMode) {
+      const hostNameForPopup = lobbyDraft.players[0]?.name && lobbyDraft.players[0].name!=='Lucky' ? lobbyDraft.players[0].name : '';
       let html = renderHome(homeSearch);
-      if (showGamePopup) html += renderGamePopup();
+      if (showGamePopup) html += renderGamePopup(hostNameForPopup);
       return html;
     }
     const inviteLink = pub.roomCode ? net.generateInviteLink(pub.roomCode) : (lobbyDraft.inviteLink || (window.location.origin + window.location.pathname + '?room=' + lobbyDraft.roomCode));
@@ -426,7 +427,7 @@ function buildLayout(pub){
           <div class="mt-6 rounded-2xl bg-[#0e2231]/80 border border-white/10 p-5">
             <h3 class="font-extrabold text-white text-sm">Join this table</h3>
             <p class="text-xs text-white/50 mt-1">Enter your name — you’ll be added to the host’s lobby. No passing.</p>
-            <input id="input-join-name" maxlength="16" placeholder="Your name" value="${escape(lobbyDraft.players[0]?.name||'')}"
+            <input id="input-join-name" maxlength="16" placeholder="Your name" value=""
               class="mt-3 w-full px-3.5 py-3 rounded-xl bg-white/10 border border-white/15 text-white placeholder:text-white/40 text-sm font-medium outline-none focus:border-[#3aa8d6]" />
             <button id="btn-join-room" class="mt-3 w-full py-3.5 rounded-full bg-[#f3ecd8] hover:bg-white text-[#0e2533] font-extrabold tracking-wide">Join ${escape(lobbyDraft.roomCode)}</button>
             <p class="text-xs text-white/40 mt-2 text-center">Host will see you appear and can start when 5+ are ready.</p>
@@ -1122,9 +1123,10 @@ function bindDynamicEvents(pub){
     });
     document.getElementById('btn-popup-play')?.addEventListener('click', async ()=>{
       const hostNameInput=document.getElementById('popup-host-name');
-      let hostName=(hostNameInput?.value||'').trim() || 'Lucky';
-      if (hostName.length>16) hostName=hostName.slice(0,16);
-      if (!hostName) hostName='Lucky';
+      let hostName=(hostNameInput?.value||'').trim();
+      if (!hostName) return toast('Enter your name','error');
+      if (hostName.length>16) return toast('Name max 16 chars','error');
+      if (hostName.length<2) return toast('Name too short','error');
       const newCode = generateRoomCode();
       persistLobbyCode(newCode);
       lobbyDraft = { roomCode: newCode, players: [{ name: hostName, isBot: false }], extraRoles: { percival: true, morgana: true, mordred: false, oberon: false } };

@@ -74,19 +74,20 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             except:
                 data = {}
             existing = ROOMS.get(code, {})
-            # Merge players by name union (lobby)
+            # Merge players — handle kicks (incoming smaller) vs adds (union)
             incoming_players = data.get("players", None)
             existing_players = existing.get("players", [])
             if incoming_players is not None:
-                # Union by name to avoid losing concurrent joiners
-                seen = {p.get("name") for p in incoming_players if p.get("name")}
-                merged_players = list(incoming_players)
-                for p in existing_players:
-                    if p.get("name") not in seen:
-                        merged_players.append(p)
-                        seen.add(p.get("name"))
-                # Keep order stable, limit 10
-                merged_players = merged_players[:10]
+                if len(incoming_players) < len(existing_players):
+                    merged_players = incoming_players[:10]
+                else:
+                    seen = {p.get("name") for p in incoming_players if p.get("name")}
+                    merged_players = list(incoming_players)
+                    for p in existing_players:
+                        if p.get("name") not in seen:
+                            merged_players.append(p)
+                            seen.add(p.get("name"))
+                    merged_players = merged_players[:10]
             else:
                 merged_players = existing_players
             # Merge state: if same phase, union votes & revealed to avoid losing concurrent submissions

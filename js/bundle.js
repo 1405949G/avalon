@@ -1168,12 +1168,16 @@ async function pushRoom(code, roomData) {
     // If pushing only players (lobby) and base has state, keep state
     mergedState = base.state;
   }
-  // Merge players by name union (lobby)
+  // Merge players — handle adds (union) and kicks (incoming authoritative when smaller)
   let mergedPlayers = roomData.players;
   if (Array.isArray(base.players) && Array.isArray(roomData.players)) {
-    const seen = new Set(roomData.players.map(p=>p.name));
-    const extra = base.players.filter(p=> !seen.has(p.name));
-    if (extra.length) mergedPlayers = [...roomData.players, ...extra];
+    if (roomData.players.length < base.players.length) {
+      mergedPlayers = roomData.players; // kick — don't re-add removed
+    } else {
+      const seen = new Set(roomData.players.map(p=>p.name));
+      const extra = base.players.filter(p=> !seen.has(p.name));
+      if (extra.length) mergedPlayers = [...roomData.players, ...extra];
+    }
   } else if (!mergedPlayers && base.players) {
     mergedPlayers = base.players;
   }
@@ -1780,7 +1784,7 @@ function renderLobby(ctx) {
     const isYou = isJoiner ? p.name===joinedName : i===0;
     const color = isYou ? 'border-emerald-400' : 'border-white/15';
     const bg = isYou ? 'bg-gradient-to-br from-amber-200 to-orange-100' : 'bg-gradient-to-br from-slate-600 to-slate-700';
-    const botBadge = p.isBot ? '<span class="absolute -bottom-1 -right-1 px-1 py-0 rounded-full bg-white/90 text-[8px] font-extrabold text-obsidian border border-white">BOT</span>' : '';
+    const botBadge = p.isBot ? '<span class="absolute -bottom-1 -right-1 px-1 py-0 rounded-full bg-white/90 text-[8px] font-extrabold text-black border border-white">BOT</span>' : '';
     const youBadge = isYou ? '<span class="absolute -bottom-2 left-1/2 -translate-x-1/2 px-2 py-0.5 rounded-full bg-white text-obsidian text-[9px] font-extrabold tracking-widest">YOU</span>' : '';
     const canKick = !isJoiner && players.length > 1;
     const canEdit = isJoiner ? p.name===joinedName : (p.isBot || i===0);
@@ -1793,8 +1797,10 @@ function renderLobby(ctx) {
           ${botBadge}
           ${kickBtn}
         </div>
-        ${youBadge}
-        <span class="text-xs font-bold text-white mt-1">${escape(p.name || 'Player')}</span>
+        <div class="flex flex-col items-center leading-none">
+          <span class="text-xs font-bold text-white truncate max-w-[64px] text-center">${escape(p.name || 'Player')}</span>
+          ${isYou?'<span class="mt-1 px-2 py-0.5 rounded-full bg-white text-obsidian text-[8px] font-black tracking-wide leading-none">YOU</span>':''}
+        </div>
         ${isYou ? '<span class="w-1.5 h-1.5 rounded-full bg-emerald-400 absolute top-0 right-1 border-2 border-[#0e2533]"></span>' : ''}
       </div>
     `;
@@ -1856,8 +1862,7 @@ function renderLobby(ctx) {
         </div>
       </div>
 
-      <!-- Avatars row -->
-      <div class="mt-5 flex gap-3 sm:gap-4 overflow-x-auto scrollbar-thin pb-2 justify-start sm:justify-center">
+      <div class="mt-5 flex flex-wrap gap-3 sm:gap-4 justify-center">
         ${avatars}
         ${waiting}
       </div>
@@ -1876,12 +1881,10 @@ function renderLobby(ctx) {
         <p class="text-xs text-white/40 mt-1.5 text-center">Tap avatar to edit or kick • Add up to 10 • Works on each player's own device</p>
       `}
 
-      <!-- Game options — collapsible -->
       <div class="mt-4 rounded-2xl bg-[#0e2231]/80 border border-white/10 backdrop-blur p-4 shadow-xl">
-        <button id="btn-toggle-options" class="w-full flex items-center justify-between">
+        <div class="flex items-center justify-between">
           <span class="font-extrabold text-white text-sm">Game options</span>
-          <span class="w-6 h-6 rounded-full bg-white/10 flex items-center justify-center text-white/60 text-xs">⌄</span>
-        </button>
+        </div>
         <div id="panel-extra-roles" class="mt-4 pt-4 border-t border-white/10">
           <h4 class="font-extrabold text-white text-sm">Extra roles</h4>
           <p class="text-xs text-white/50 mt-1 leading-snug">Merlin and the Assassin are always dealt. Tap to add the rest.</p>
@@ -1908,7 +1911,7 @@ function renderLobby(ctx) {
         </div>
       </div>
 
-      <div class="h-20"></div>
+      <div class="h-28"></div>
     </div>
 
     <!-- Bottom sticky bar — like screenshot -->
@@ -2191,7 +2194,7 @@ function renderHome(searchQuery='') {
   `;
 }
 
-function renderGamePopup() {
+function renderGamePopup(hostName='') {
   return `
     <div id="game-popup-overlay" class="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
       <div class="relative w-full max-w-[420px] rounded-[28px] bg-[#1e1a2e] border border-white/10 shadow-2xl overflow-hidden p-6 text-center">
@@ -2215,7 +2218,7 @@ function renderGamePopup() {
           </div>
         </div>
         <div class="mt-4">
-          <input id="popup-host-name" maxlength="16" placeholder="Your name (host)" class="w-full px-3.5 py-3 rounded-xl bg-white/10 border border-white/20 text-white placeholder:text-white/40 text-sm font-medium outline-none focus:border-[#7ec8e6] text-center" />
+          <input id="popup-host-name" maxlength="16" placeholder="Your name (host)" value="${escape(hostName)}" class="w-full px-3.5 py-3 rounded-xl bg-white/10 border border-white/20 text-white placeholder:text-white/40 text-sm font-medium outline-none focus:border-[#7ec8e6] text-center" />
           <p class="text-xs text-white/30 mt-1">You can change this and add bots in the lobby</p>
         </div>
         <button id="btn-popup-play" class="mt-4 w-full py-3.5 rounded-full bg-gradient-to-b from-[#a0d8f0] to-[#7ec8e6] hover:from-[#b0e0f5] hover:to-[#8ed0ea] text-[#0a1e2e] font-black tracking-wide shadow-lg">Play now</button>
@@ -2949,8 +2952,9 @@ function buildLayout(pub){
       return renderJoinCodeScreen(joinCodeInput);
     }
     if (uiMode === 'HOME' && !isJoinerMode) {
+      const hostNameForPopup = lobbyDraft.players[0]?.name && lobbyDraft.players[0].name!=='Lucky' ? lobbyDraft.players[0].name : '';
       let html = renderHome(homeSearch);
-      if (showGamePopup) html += renderGamePopup();
+      if (showGamePopup) html += renderGamePopup(hostNameForPopup);
       return html;
     }
     const inviteLink = pub.roomCode ? net.generateInviteLink(pub.roomCode) : (lobbyDraft.inviteLink || (window.location.origin + window.location.pathname + '?room=' + lobbyDraft.roomCode));
@@ -2994,7 +2998,7 @@ function buildLayout(pub){
           <div class="mt-6 rounded-2xl bg-[#0e2231]/80 border border-white/10 p-5">
             <h3 class="font-extrabold text-white text-sm">Join this table</h3>
             <p class="text-xs text-white/50 mt-1">Enter your name — you’ll be added to the host’s lobby. No passing.</p>
-            <input id="input-join-name" maxlength="16" placeholder="Your name" value="${escape(lobbyDraft.players[0]?.name||'')}"
+            <input id="input-join-name" maxlength="16" placeholder="Your name" value=""
               class="mt-3 w-full px-3.5 py-3 rounded-xl bg-white/10 border border-white/15 text-white placeholder:text-white/40 text-sm font-medium outline-none focus:border-[#3aa8d6]" />
             <button id="btn-join-room" class="mt-3 w-full py-3.5 rounded-full bg-[#f3ecd8] hover:bg-white text-[#0e2533] font-extrabold tracking-wide">Join ${escape(lobbyDraft.roomCode)}</button>
             <p class="text-xs text-white/40 mt-2 text-center">Host will see you appear and can start when 5+ are ready.</p>
@@ -3690,9 +3694,10 @@ function bindDynamicEvents(pub){
     });
     document.getElementById('btn-popup-play')?.addEventListener('click', async ()=>{
       const hostNameInput=document.getElementById('popup-host-name');
-      let hostName=(hostNameInput?.value||'').trim() || 'Lucky';
-      if (hostName.length>16) hostName=hostName.slice(0,16);
-      if (!hostName) hostName='Lucky';
+      let hostName=(hostNameInput?.value||'').trim();
+      if (!hostName) return toast('Enter your name','error');
+      if (hostName.length>16) return toast('Name max 16 chars','error');
+      if (hostName.length<2) return toast('Name too short','error');
       const newCode = generateRoomCode();
       persistLobbyCode(newCode);
       lobbyDraft = { roomCode: newCode, players: [{ name: hostName, isBot: false }], extraRoles: { percival: true, morgana: true, mordred: false, oberon: false } };
