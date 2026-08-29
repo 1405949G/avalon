@@ -74,19 +74,32 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             except:
                 data = {}
             existing = ROOMS.get(code, {})
-            # Merge players — handle kicks (incoming smaller) vs adds (union)
+            # Merge players — handle kicks (incoming smaller) vs adds (union) — use id if available
             incoming_players = data.get("players", None)
             existing_players = existing.get("players", [])
             if incoming_players is not None:
-                if len(incoming_players) < len(existing_players):
+                incoming_ids = {p.get("id") for p in incoming_players if p.get("id")}
+                incoming_names = {p.get("name") for p in incoming_players if p.get("name")}
+                existing_ids = {p.get("id") for p in existing_players if p.get("id")}
+                missing_ids = [p.get("id") for p in existing_players if p.get("id") and p.get("id") not in incoming_ids]
+                extra_ids = [p.get("id") for p in incoming_players if p.get("id") and p.get("id") not in existing_ids]
+                if len(incoming_players) < len(existing_players) and missing_ids and not extra_ids:
+                    # Likely a kick — incoming authoritative
                     merged_players = incoming_players[:10]
                 else:
-                    seen = {p.get("name") for p in incoming_players if p.get("name")}
                     merged_players = list(incoming_players)
+                    seen_ids = set(incoming_ids)
+                    seen_names = set(incoming_names)
                     for p in existing_players:
-                        if p.get("name") not in seen:
-                            merged_players.append(p)
-                            seen.add(p.get("name"))
+                        pid = p.get("id")
+                        if pid:
+                            if pid not in seen_ids:
+                                merged_players.append(p)
+                                seen_ids.add(pid)
+                        else:
+                            if p.get("name") not in seen_names:
+                                merged_players.append(p)
+                                seen_names.add(p.get("name"))
                     merged_players = merged_players[:10]
             else:
                 merged_players = existing_players

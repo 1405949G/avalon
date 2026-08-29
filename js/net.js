@@ -88,13 +88,22 @@ export async function pushRoom(code, roomData) {
     mergedState = base.state;
   }
   // Merge players — handle adds (union) and kicks (incoming authoritative when smaller)
+  // Use id as primary key, fallback to name for legacy
   let mergedPlayers = roomData.players;
   if (Array.isArray(base.players) && Array.isArray(roomData.players)) {
-    if (roomData.players.length < base.players.length) {
-      mergedPlayers = roomData.players; // kick — don't re-add removed
+    const incomingIds = new Set(roomData.players.map(p=>p.id).filter(Boolean));
+    const incomingNames = new Set(roomData.players.map(p=>p.name));
+    const baseIds = new Set(base.players.map(p=>p.id).filter(Boolean));
+    const missingIds = base.players.filter(p=> p.id && !incomingIds.has(p.id)).map(p=>p.id);
+    const extraIds = roomData.players.filter(p=> p.id && !baseIds.has(p.id)).map(p=>p.id);
+    if (roomData.players.length < base.players.length && missingIds.length > 0 && extraIds.length === 0) {
+      // Likely a kick — incoming is authoritative, don't re-add removed
+      mergedPlayers = roomData.players;
     } else {
-      const seen = new Set(roomData.players.map(p=>p.name));
-      const extra = base.players.filter(p=> !seen.has(p.name));
+      const extra = base.players.filter(p=> {
+        if (p.id) return !incomingIds.has(p.id);
+        return !incomingNames.has(p.name);
+      });
       if (extra.length) mergedPlayers = [...roomData.players, ...extra];
     }
   } else if (!mergedPlayers && base.players) {

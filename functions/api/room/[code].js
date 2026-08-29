@@ -82,15 +82,24 @@ export async function onRequestPost({ request, params, env }) {
     } else {
       existing = MEM.get(code) || null;
     }
-    // Merge players — handle kicks vs adds
+    // Merge players — handle kicks vs adds — use id if available
     let mergedPlayers = Array.isArray(body.players) ? body.players.slice(0,10) : null;
     if (existing && Array.isArray(existing.players) && mergedPlayers) {
-      if (mergedPlayers.length < existing.players.length) {
-        // Kick — incoming is authoritative, don't re-add
+      const incomingIds = new Set(mergedPlayers.map(p=>p.id).filter(Boolean));
+      const existingIds = new Set(existing.players.map(p=>p.id).filter(Boolean));
+      const missingIds = existing.players.filter(p=> p.id && !incomingIds.has(p.id)).map(p=>p.id);
+      const extraIds = mergedPlayers.filter(p=> p.id && !existingIds.has(p.id)).map(p=>p.id);
+      if (mergedPlayers.length < existing.players.length && missingIds.length && extraIds.length===0) {
+        // Kick — incoming authoritative
       } else {
-        const seen = new Set(mergedPlayers.map(p=>p.name));
+        const seenIds = new Set(mergedPlayers.map(p=>p.id).filter(Boolean));
+        const seenNames = new Set(mergedPlayers.map(p=>p.name));
         for (const p of existing.players) {
-          if (!seen.has(p.name) && mergedPlayers.length < 10) { mergedPlayers.push(p); seen.add(p.name); }
+          if (p.id) {
+            if (!seenIds.has(p.id) && mergedPlayers.length < 10) { mergedPlayers.push(p); seenIds.add(p.id); }
+          } else {
+            if (!seenNames.has(p.name) && mergedPlayers.length < 10) { mergedPlayers.push(p); seenNames.add(p.name); }
+          }
         }
       }
     } else if (!mergedPlayers && existing && Array.isArray(existing.players)) {
