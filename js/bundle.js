@@ -1784,7 +1784,7 @@ function renderLobby(ctx) {
     const kickBtn = canKick ? `<button data-kick-idx="${i}" class="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-black/70 hover:bg-evil border border-white/20 flex items-center justify-center text-white text-[9px] leading-none opacity-90 hover:opacity-100 transition-opacity" title="Kick">✕</button>` : '';
     return `
       <div class="flex flex-col items-center gap-1.5 relative group">
-        <div data-edit-idx="${i}" class="relative w-[56px] h-[56px] sm:w-[60px] sm:h-[60px] rounded-full border-2 ${color} ${bg} flex items-center justify-center text-lg font-extrabold text-white overflow-hidden shadow-md cursor-pointer hover:scale-105 transition-transform">
+        <div data-edit-idx="${i}" class="relative w-[56px] h-[56px] sm:w-[60px] sm:h-[60px] rounded-full border-2 ${color} ${bg} flex items-center justify-center text-lg font-extrabold text-white shadow-md cursor-pointer hover:scale-105 transition-transform">
           ${p.name ? escape(p.name[0].toUpperCase()) : '?'}
           ${botBadge}
           ${kickBtn}
@@ -2097,13 +2097,13 @@ function renderExactAvatarRow(pub, myId, statusMap) {
     const dot = isReady ? '<span class="absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-emerald-500 border-2 border-[#0a1e2e] flex items-center justify-center text-[10px] text-white">✓</span>' : '';
     return `
       <div class="flex flex-col items-center gap-1 min-w-[56px]">
-        <div class="relative w-12 h-12 rounded-full ${bg} border-2 ${border} flex items-center justify-center font-black text-sm overflow-hidden">
+        <div class="relative w-12 h-12 rounded-full ${bg} border-2 ${border} flex items-center justify-center font-black text-sm">
           ${initials}
           ${dot}
         </div>
         <div class="flex flex-col items-center leading-none">
           <span class="text-xs font-bold ${isYou?'text-white':'text-white/70'} truncate max-w-[72px] text-center">${escape(p.name)}</span>
-          ${isYou?'<span class="mt-1 px-1.5 py-0.5 rounded-full bg-[#f3ecd8] text-obsidian text-[7px] font-black leading-none">YOU</span>':''}
+          ${isYou?'<span class="mt-1 px-2 py-0.5 rounded-full bg-[#f3ecd8] text-[#0e2533] text-[8px] font-black leading-none tracking-wide">YOU</span>':''}
         </div>
         <span class="text-[10px] font-black tracking-widest ${isReady?'text-emerald-400':'text-white/30'}">${status}</span>
       </div>
