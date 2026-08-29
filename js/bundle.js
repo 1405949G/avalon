@@ -1339,6 +1339,7 @@ function parseInviteCode() {
   return null;
 }
 
+const net = { pushRoom, createRoom, getRoom, getRoomAsync, joinRoom, updateRoomState, updateRoomStateSync, subscribe, leaveRoom, generateInviteLink, parseInviteCode, fetchRoom, getLocalRoom, setLocalRoom };
 
 // ---- js/ai.js ----
 

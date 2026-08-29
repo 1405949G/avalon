@@ -71,7 +71,7 @@ function mergeStates(oldState, incomingState) {
   return merged;
 }
 
-async function pushRoom(code, roomData) {
+export async function pushRoom(code, roomData) {
   // Merge with both local and server to avoid races
   let existingLocal = getLocalRoom(code) || {};
   let existingServer = null;
