@@ -5,7 +5,7 @@
  * Updated for Table Party blended lobby + extra roles.
  */
 
-import { ALLEGIANCE, EXTRA_ROLES } from '../config.js';
+import { ALLEGIANCE, EXTRA_ROLES, getEffectiveExtraRoles, getRoleList, allegianceOf } from '../config.js';
 
 // ——— Quest Track ———
 export function renderQuestTrack(pub) {
@@ -198,17 +198,22 @@ export function renderLobby(ctx) {
     </div>
   `).join('');
 
-  // Extra roles toggles
+  // Extra roles toggles — enforce evil cap by player count
+  const maxEvil = (()=>{ try{ const p = players.length; if(p<=6) return 1; if(p<=8) return 2; return 3; }catch(_){return 3}})();
+  const enabledEvil = ['morgana','mordred','oberon'].filter(k=> !!extra[k]).length;
   const roleButtons = EXTRA_ROLES.map(r => {
     const active = !!extra[r.key];
-    const bg = active ? 'bg-[#3aa8d6] border-[#3aa8d6] text-white' : 'bg-white/[0.06] border-white/15 text-stone-300' + (isJoiner ? '' : ' hover:bg-white/10');
+    const isEvil = r.side==='EVIL';
+    const wouldExceed = !active && isEvil && enabledEvil >= maxEvil;
+    const bg = active ? 'bg-[#3aa8d6] border-[#3aa8d6] text-white' : (wouldExceed ? 'bg-white/[0.03] border-white/10 text-white/30' : 'bg-white/[0.06] border-white/15 text-stone-300' + (isJoiner ? '' : ' hover:bg-white/10'));
     const sideColor = r.side === 'GOOD' ? 'text-cyan-200' : 'text-rose-200';
     const extraAttr = isJoiner ? '' : `data-extra="${r.key}"`;
-    const disabled = isJoiner ? 'disabled opacity-60 cursor-not-allowed' : '';
+    const disabled = isJoiner ? 'disabled opacity-60 cursor-not-allowed' : (wouldExceed ? 'disabled opacity-40 cursor-not-allowed' : '');
+    const title = wouldExceed ? `Max ${maxEvil} evil extra for ${players.length} players` : '';
     return `
-      <button ${extraAttr} ${disabled} class="text-left rounded-full px-3.5 py-2.5 border flex flex-col leading-none ${bg} transition-colors">
-        <span class="text-[13px] font-extrabold tracking-wide ${active ? 'text-white' : 'text-white'}">${r.label}</span>
-        <span class="text-[10px] font-bold tracking-[0.14em] ${active ? 'text-white/80' : sideColor}">${r.side}</span>
+      <button ${extraAttr} ${disabled} title="${title}" class="text-left rounded-full px-3.5 py-2.5 border flex flex-col leading-none ${bg} transition-colors">
+        <span class="text-[13px] font-extrabold tracking-wide ${active ? 'text-white' : wouldExceed ? 'text-white/40' : 'text-white'}">${r.label}</span>
+        <span class="text-[10px] font-bold tracking-[0.14em] ${active ? 'text-white/80' : wouldExceed ? 'text-white/30' : sideColor}">${r.side}${wouldExceed?' • MAX':''}</span>
       </button>
     `;
   }).join('');
@@ -454,24 +459,21 @@ export function renderExactVision(pub, myId) {
 
 export function renderExactTableSummary(pub) {
   const total = pub.players.length;
-  // Count loyal vs evil based on roles if available, else estimate from quest setup
-  // For exact screenshot: "5 at the table — 3 loyal, 2 sworn to evil."
-  let loyal = 3, evil = 2;
-  if (pub.players.length===5) { loyal=3; evil=2; }
-  else if (pub.players.length===6) { loyal=4; evil=2; }
-  else if (pub.players.length===7) { loyal=4; evil=3; }
-  else if (pub.players.length===8) { loyal=5; evil=3; }
-  else if (pub.players.length===9) { loyal=6; evil=3; }
-  else if (pub.players.length===10) { loyal=6; evil=4; }
-  // If extraRoles enabled, pill list should reflect enabled roles
+  const effective = getEffectiveExtraRoles(total, pub.extraRoles || {});
+  let roles = [];
+  try { roles = getRoleList(total, effective); } catch(_) { roles = []; }
+  const good = roles.filter(r=> allegianceOf(r)==='GOOD').length || (total - Math.ceil(total*0.4));
+  const evil = roles.length ? roles.length - good : Math.ceil(total*0.4);
+  // For display, loyal = total good (includes Merlin/Percival) as per screenshot wording
+  const loyal = good;
+  // Pill list should reflect effective roles (capped)
   const pills = [];
   if (true) pills.push('Merlin');
-  if (pub.extraRoles?.percival) pills.push('Percival');
-  // Always show Assassin pill as in screenshot
+  if (effective.percival) pills.push('Percival');
   pills.push('The Assassin');
-  if (pub.extraRoles?.morgana) pills.push('Morgana');
-  if (pub.extraRoles?.mordred) pills.push('Mordred');
-  if (pub.extraRoles?.oberon) pills.push('Oberon');
+  if (effective.morgana) pills.push('Morgana');
+  if (effective.mordred) pills.push('Mordred');
+  if (effective.oberon) pills.push('Oberon');
   return `
     <div class="text-center mt-3">
       <p class="text-sm text-white/70">${total} at the table — ${loyal} loyal, ${evil} sworn to evil.</p>

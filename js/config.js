@@ -74,6 +74,22 @@ export const EXTRA_ROLES = Object.freeze([
   { key: 'oberon', role: ROLES.OBERON, label: 'Oberon', side: 'EVIL', desc: 'Isolated Evil' },
 ]);
 
+// Balancing: max extra evil roles by player count to keep Good majority
+export function getMaxExtraEvil(playerCount) {
+  if (playerCount <= 6) return 1;
+  if (playerCount <= 8) return 2;
+  return 3;
+}
+export function getEffectiveExtraRoles(playerCount, opts) {
+  const max = getMaxExtraEvil(playerCount);
+  const enabled = ['morgana','mordred','oberon'].filter(k=> !!opts[k]);
+  if (enabled.length <= max) return { ...opts };
+  // Trim to max in priority order: keep earliest enabled, drop overflow
+  const trimmed = { ...opts, morgana:false, mordred:false, oberon:false };
+  for (let i=0;i<Math.min(enabled.length, max);i++) trimmed[enabled[i]] = true;
+  return trimmed;
+}
+
 export const ALLEGIANCE = Object.freeze({
   GOOD: 'GOOD',
   EVIL: 'EVIL',
@@ -115,6 +131,8 @@ export function getFailsRequired(playerCount, questIndex) {
 export function getRoleList(playerCount, opts = {}) {
   const c = ROLE_COUNTS[playerCount];
   if (!c) throw new Error(`Unsupported player count: ${playerCount}`);
+  // Enforce balance: cap evil extras to keep Good majority
+  const effective = getEffectiveExtraRoles(playerCount, opts);
   // Base counts
   let loyal = c.loyal;
   let minion = c.minion;
@@ -124,53 +142,30 @@ export function getRoleList(playerCount, opts = {}) {
   roles.push(ROLES.ASSASSIN);
 
   // Good extra: Percival replaces a Loyal
-  if (opts.percival && loyal > 0) {
+  if (effective.percival && loyal > 0) {
     roles.push(ROLES.PERCIVAL);
     loyal--;
   }
-  // Evil extras replace Minions in priority order: Morgana -> Mordred -> Oberon
-  if (opts.morgana && minion > 0) {
+  // Evil extras replace Minions in priority order: Morgana -> Mordred -> Oberon (capped)
+  if (effective.morgana && minion > 0) {
     roles.push(ROLES.MORGANA);
     minion--;
   }
-  if (opts.mordred && minion > 0) {
+  if (effective.mordred && minion > 0) {
     roles.push(ROLES.MORDRED);
     minion--;
   }
-  if (opts.oberon && minion > 0) {
+  if (effective.oberon && minion > 0) {
     roles.push(ROLES.OBERON);
     minion--;
-  }
-  // If still extra enabled but no minion slot, we expand evil by 1 per extra (house rule to allow all toggles)
-  // This keeps UI toggles always reflected, even at 5p with 3 evil extras
-  // We track overflow and adjust counts — only if user explicitly enabled more than slots
-  const enabledEvilExtras = (opts.morgana?1:0)+(opts.mordred?1:0)+(opts.oberon?1:0);
-  const dealtEvilExtras = roles.filter(r => [ROLES.MORGANA, ROLES.MORDRED, ROLES.OBERON].includes(r)).length;
-  if (enabledEvilExtras > dealtEvilExtras) {
-    // Add overflow as additional evil, converting a loyal if possible, otherwise just add
-    const overflow = enabledEvilExtras - dealtEvilExtras;
-    for (let i=0;i<overflow;i++) {
-      if (loyal > 0) {
-        // Convert a Good slot to Evil to make room
-        loyal--;
-        // Add the first not-yet-added extra in order
-        if (opts.morgana && !roles.includes(ROLES.MORGANA)) roles.push(ROLES.MORGANA);
-        else if (opts.mordred && !roles.includes(ROLES.MORDRED)) roles.push(ROLES.MORDRED);
-        else if (opts.oberon && !roles.includes(ROLES.OBERON)) roles.push(ROLES.OBERON);
-      } else {
-        // No room at all — just push and let total exceed? We'll allow up to 10, but exceed playerCount would be wrong
-        // In this edge, we ignore extra
-      }
-    }
   }
 
   for (let i=0;i<loyal;i++) roles.push(ROLES.LOYAL);
   for (let i=0;i<minion;i++) roles.push(ROLES.MINION);
 
-  // Safety: if roles.length != playerCount due to overflow logic, trim or pad
+  // Safety: if roles.length != playerCount due to capping, trim or pad
   while (roles.length < playerCount) roles.push(ROLES.LOYAL);
   while (roles.length > playerCount) {
-    // Remove a generic Loyal/Minion to fit
     const idx = roles.findIndex(r => r===ROLES.LOYAL || r===ROLES.MINION);
     if (idx!==-1) roles.splice(idx,1);
     else break;

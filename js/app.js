@@ -3,7 +3,7 @@
  * Each player on own device sees private role, no passing.
  * Keeps pure reducer orchestration + backend abstraction via net.js
  */
-import { PHASES, TIMER_SECONDS, REVEAL_ANIM_MS, generateRoomCode, isValidRoomCode, EXTRA_ROLES } from './config.js';
+import { PHASES, TIMER_SECONDS, REVEAL_ANIM_MS, generateRoomCode, isValidRoomCode, EXTRA_ROLES, getMaxExtraEvil, getEffectiveExtraRoles } from './config.js';
 import { createInitialState, reducer, getPublicState, getPrivateState, getAIView, getVision } from './state.js';
 import * as storage from './storage.js';
 import * as net from './net.js';
@@ -156,6 +156,24 @@ function startLobbyPoll() {
         }
         // Single source of truth: KV room is authoritative
         lobbyRoomCache = room;
+        // Auto-trim extra evil if player count now over limit (e.g., kicked down to 5)
+        try {
+          const maxEvil = getMaxExtraEvil((room.players||[]).length);
+          const enabledEvil = ['morgana','mordred','oberon'].filter(k=> !!(room.extraRoles||{})[k]).length;
+          if (enabledEvil > maxEvil) {
+            const effective = getEffectiveExtraRoles(room.players.length, room.extraRoles);
+            room.extraRoles = effective;
+            lobbyRoomCache.extraRoles = effective;
+            if (!isJoinerMode) {
+              lobbyDraft.extraRoles = effective;
+              saveLobbyDraft();
+              try{ await net.pushRoom(lobbyDraft.roomCode, { extraRoles: effective }); }catch(_){}
+              toast(`Trimmed evil extras to ${maxEvil} for ${room.players.length} players`,'default');
+            } else {
+              lobbyDraft.extraRoles = effective;
+            }
+          }
+        } catch(_){}
         // Keep lobbyDraft in sync for host fallback / offline
         if (!isJoinerMode) {
           lobbyDraft.players = room.players.map(p=>({id:p.id, name:p.name, isBot:!!p.isBot}));
@@ -1413,6 +1431,16 @@ function bindDynamicEvents(pub){
         const key=btn.dataset.extra;
         const room = lobbyRoomCache || await net.getRoomAsync(lobbyDraft.roomCode).catch(()=>null) || { code: lobbyDraft.roomCode, players: lobbyDraft.players, extraRoles: {...lobbyDraft.extraRoles} };
         room.extraRoles = room.extraRoles || {...lobbyDraft.extraRoles};
+        const isEvil = ['morgana','mordred','oberon'].includes(key);
+        const wasActive = !!room.extraRoles[key];
+        if (!wasActive && isEvil) {
+          const max = getMaxExtraEvil((room.players||[]).length);
+          const enabled = ['morgana','mordred','oberon'].filter(k=> !!room.extraRoles[k]).length;
+          if (enabled >= max) {
+            toast(`Max ${max} evil extra for ${(room.players||[]).length} players — remove one first`,'error');
+            return;
+          }
+        }
         room.extraRoles[key]=!room.extraRoles[key];
         try {
           await net.pushRoom(lobbyDraft.roomCode, { extraRoles: room.extraRoles });
@@ -1427,6 +1455,16 @@ function bindDynamicEvents(pub){
         // Single source of truth: KV room
         const room = lobbyRoomCache || await net.getRoomAsync(lobbyDraft.roomCode).catch(()=>null) || { code: lobbyDraft.roomCode, players: lobbyDraft.players, extraRoles: lobbyDraft.extraRoles };
         const latestPlayers = (room.players || []).map(p=>({ id: p.id, name: p.name, isBot: !!p.isBot }));
+        const effectiveOpts = getEffectiveExtraRoles(latestPlayers.length, room.extraRoles || lobbyDraft.extraRoles);
+        // If capped, update lobby to reflect effective
+        if (JSON.stringify(effectiveOpts) !== JSON.stringify(room.extraRoles || lobbyDraft.extraRoles)) {
+          room.extraRoles = effectiveOpts;
+          try{ await net.pushRoom(lobbyDraft.roomCode, { extraRoles: effectiveOpts }); }catch(_){}
+          lobbyRoomCache = room;
+          lobbyDraft.extraRoles = effectiveOpts;
+          saveLobbyDraft();
+          toast(`Balanced roles for ${latestPlayers.length} players`,'default');
+        }
         const players=latestPlayers.map((p,i)=>({ id: p.id || `p${i}_${Date.now().toString(36).slice(-3)}_${Math.random().toString(36).slice(2,5)}`, name: String(p.name).trim() || `Player ${i+1}`, isBot: !!p.isBot }));
         const names=players.map(p=>p.name);
         if (new Set(names).size!==names.length) throw new Error('Duplicate names — make each unique');
@@ -1442,11 +1480,11 @@ function bindDynamicEvents(pub){
           players.forEach(p=> nameToId[p.name] = p.id);
           localStorage.setItem('avalon:nameToId:'+lobbyDraft.roomCode, JSON.stringify(nameToId));
         } catch(_){}
-        dispatch({ type:'SETUP_GAME', payload:{ players, opts: lobbyDraft.extraRoles, roomCode: lobbyDraft.roomCode }});
+        dispatch({ type:'SETUP_GAME', payload:{ players, opts: effectiveOpts, roomCode: lobbyDraft.roomCode }});
         try {
           await net.createRoom(lobbyDraft.roomCode, players[0]);
           const roomPlayers = players.map(p=>({id:p.id, name:p.name, isBot:p.isBot}));
-          await net.pushRoom(lobbyDraft.roomCode, { players: roomPlayers, state, hostId: players[0].id });
+          await net.pushRoom(lobbyDraft.roomCode, { players: roomPlayers, state, hostId: players[0].id, extraRoles: effectiveOpts });
           // Host must also subscribe to game updates (so it sees joiner votes)
           stopLobbyPoll();
           if (roomUnsub) try{ roomUnsub(); }catch(_){}

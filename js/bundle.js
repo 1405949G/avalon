@@ -72,12 +72,111 @@ const ROLES = Object.freeze({
 });
 
 // For UI toggles — extensible
-const EXTRA_ROLES = Object.freeze([
+export const EXTRA_ROLES = Object.freeze([
   { key: 'percival', role: ROLES.PERCIVAL, label: 'Percival', side: 'GOOD', desc: 'Sees Merlin' },
   { key: 'morgana', role: ROLES.MORGANA, label: 'Morgana', side: 'EVIL', desc: 'Fools Percival' },
   { key: 'mordred', role: ROLES.MORDRED, label: 'Mordred', side: 'EVIL', desc: 'Hidden from Merlin' },
   { key: 'oberon', role: ROLES.OBERON, label: 'Oberon', side: 'EVIL', desc: 'Isolated Evil' },
 ]);
+
+// Balancing: max extra evil roles by player count to keep Good majority
+export function getMaxExtraEvil(playerCount) {
+  if (playerCount <= 6) return 1;
+  if (playerCount <= 8) return 2;
+  return 3;
+}
+export function getEffectiveExtraRoles(playerCount, opts) {
+  const max = getMaxExtraEvil(playerCount);
+  const enabled = ['morgana','mordred','oberon'].filter(k=> !!opts[k]);
+  if (enabled.length <= max) return { ...opts };
+  // Trim to max in priority order: keep earliest enabled, drop overflow
+  const trimmed = { ...opts, morgana:false, mordred:false, oberon:false };
+  for (let i=0;i<Math.min(enabled.length, max);i++) trimmed[enabled[i]] = true;
+  return trimmed;
+}
+
+export const ALLEGIANCE = Object.freeze({
+  GOOD: 'GOOD',
+  EVIL: 'EVIL',
+});
+
+export function allegianceOf(role) {
+  if (role === ROLES.LOYAL || role === ROLES.MERLIN || role === ROLES.PERCIVAL) return ALLEGIANCE.GOOD;
+  return ALLEGIANCE.EVIL;
+}
+
+export const MAX_PROPOSAL_TRACKER = 5;
+export const WIN_THRESHOLD = 3;
+export const TIMER_SECONDS = 90;
+export const REVEAL_ANIM_MS = 1200;
+export const STORAGE_KEY = 'avalon:quest-of-shadows:v3';
+export const STORAGE_VERSION = 3;
+export const ROOM_CODE_LENGTH = 4;
+export const ROOM_STORAGE_PREFIX = 'avalon:room:';
+
+export function getQuestSize(playerCount, questIndex) {
+  const sizes = QUEST_SIZES[playerCount];
+  if (!sizes) throw new Error(`Unsupported player count: ${playerCount}`);
+  if (questIndex < 0 || questIndex >= 5) throw new Error(`Invalid quest index: ${questIndex}`);
+  return sizes[questIndex];
+}
+
+export function getFailsRequired(playerCount, questIndex) {
+  const fails = FAILS_REQUIRED[playerCount];
+  if (!fails) throw new Error(`Unsupported player count: ${playerCount}`);
+  return fails[questIndex];
+}
+
+/**
+ * Build role list for a player count with optional extra roles.
+ * @param {number} playerCount 5-10
+ * @param {object} opts {percival,morgana,mordred,oberon} booleans
+ * @returns {string[]} roles length == playerCount, shuffled not yet
+ */
+export function getRoleList(playerCount, opts = {}) {
+  const c = ROLE_COUNTS[playerCount];
+  if (!c) throw new Error(`Unsupported player count: ${playerCount}`);
+  // Enforce balance: cap evil extras to keep Good majority
+  const effective = getEffectiveExtraRoles(playerCount, opts);
+  // Base counts
+  let loyal = c.loyal;
+  let minion = c.minion;
+  const roles = [];
+  // Always
+  roles.push(ROLES.MERLIN);
+  roles.push(ROLES.ASSASSIN);
+
+  // Good extra: Percival replaces a Loyal
+  if (effective.percival && loyal > 0) {
+    roles.push(ROLES.PERCIVAL);
+    loyal--;
+  }
+  // Evil extras replace Minions in priority order: Morgana -> Mordred -> Oberon (capped)
+  if (effective.morgana && minion > 0) {
+    roles.push(ROLES.MORGANA);
+    minion--;
+  }
+  if (effective.mordred && minion > 0) {
+    roles.push(ROLES.MORDRED);
+    minion--;
+  }
+  if (effective.oberon && minion > 0) {
+    roles.push(ROLES.OBERON);
+    minion--;
+  }
+
+  for (let i=0;i<loyal;i++) roles.push(ROLES.LOYAL);
+  for (let i=0;i<minion;i++) roles.push(ROLES.MINION);
+
+  // Safety: if roles.length != playerCount due to capping, trim or pad
+  while (roles.length < playerCount) roles.push(ROLES.LOYAL);
+  while (roles.length > playerCount) {
+    const idx = roles.findIndex(r => r===ROLES.LOYAL || r===ROLES.MINION);
+    if (idx!==-1) roles.splice(idx,1);
+    else break;
+  }
+  return roles;
+}
 
 const ALLEGIANCE = Object.freeze({
   GOOD: 'GOOD',
@@ -1813,17 +1912,22 @@ function renderLobby(ctx) {
     </div>
   `).join('');
 
-  // Extra roles toggles
+  // Extra roles toggles — enforce evil cap by player count
+  const maxEvil = (()=>{ try{ const p = players.length; if(p<=6) return 1; if(p<=8) return 2; return 3; }catch(_){return 3}})();
+  const enabledEvil = ['morgana','mordred','oberon'].filter(k=> !!extra[k]).length;
   const roleButtons = EXTRA_ROLES.map(r => {
     const active = !!extra[r.key];
-    const bg = active ? 'bg-[#3aa8d6] border-[#3aa8d6] text-white' : 'bg-white/[0.06] border-white/15 text-stone-300' + (isJoiner ? '' : ' hover:bg-white/10');
+    const isEvil = r.side==='EVIL';
+    const wouldExceed = !active && isEvil && enabledEvil >= maxEvil;
+    const bg = active ? 'bg-[#3aa8d6] border-[#3aa8d6] text-white' : (wouldExceed ? 'bg-white/[0.03] border-white/10 text-white/30' : 'bg-white/[0.06] border-white/15 text-stone-300' + (isJoiner ? '' : ' hover:bg-white/10'));
     const sideColor = r.side === 'GOOD' ? 'text-cyan-200' : 'text-rose-200';
     const extraAttr = isJoiner ? '' : `data-extra="${r.key}"`;
-    const disabled = isJoiner ? 'disabled opacity-60 cursor-not-allowed' : '';
+    const disabled = isJoiner ? 'disabled opacity-60 cursor-not-allowed' : (wouldExceed ? 'disabled opacity-40 cursor-not-allowed' : '');
+    const title = wouldExceed ? `Max ${maxEvil} evil extra for ${players.length} players` : '';
     return `
-      <button ${extraAttr} ${disabled} class="text-left rounded-full px-3.5 py-2.5 border flex flex-col leading-none ${bg} transition-colors">
-        <span class="text-[13px] font-extrabold tracking-wide ${active ? 'text-white' : 'text-white'}">${r.label}</span>
-        <span class="text-[10px] font-bold tracking-[0.14em] ${active ? 'text-white/80' : sideColor}">${r.side}</span>
+      <button ${extraAttr} ${disabled} title="${title}" class="text-left rounded-full px-3.5 py-2.5 border flex flex-col leading-none ${bg} transition-colors">
+        <span class="text-[13px] font-extrabold tracking-wide ${active ? 'text-white' : wouldExceed ? 'text-white/40' : 'text-white'}">${r.label}</span>
+        <span class="text-[10px] font-bold tracking-[0.14em] ${active ? 'text-white/80' : wouldExceed ? 'text-white/30' : sideColor}">${r.side}${wouldExceed?' • MAX':''}</span>
       </button>
     `;
   }).join('');
@@ -2069,24 +2173,21 @@ function renderExactVision(pub, myId) {
 
 function renderExactTableSummary(pub) {
   const total = pub.players.length;
-  // Count loyal vs evil based on roles if available, else estimate from quest setup
-  // For exact screenshot: "5 at the table — 3 loyal, 2 sworn to evil."
-  let loyal = 3, evil = 2;
-  if (pub.players.length===5) { loyal=3; evil=2; }
-  else if (pub.players.length===6) { loyal=4; evil=2; }
-  else if (pub.players.length===7) { loyal=4; evil=3; }
-  else if (pub.players.length===8) { loyal=5; evil=3; }
-  else if (pub.players.length===9) { loyal=6; evil=3; }
-  else if (pub.players.length===10) { loyal=6; evil=4; }
-  // If extraRoles enabled, pill list should reflect enabled roles
+  const effective = getEffectiveExtraRoles(total, pub.extraRoles || {});
+  let roles = [];
+  try { roles = getRoleList(total, effective); } catch(_) { roles = []; }
+  const good = roles.filter(r=> allegianceOf(r)==='GOOD').length || (total - Math.ceil(total*0.4));
+  const evil = roles.length ? roles.length - good : Math.ceil(total*0.4);
+  // For display, loyal = total good (includes Merlin/Percival) as per screenshot wording
+  const loyal = good;
+  // Pill list should reflect effective roles (capped)
   const pills = [];
   if (true) pills.push('Merlin');
-  if (pub.extraRoles?.percival) pills.push('Percival');
-  // Always show Assassin pill as in screenshot
+  if (effective.percival) pills.push('Percival');
   pills.push('The Assassin');
-  if (pub.extraRoles?.morgana) pills.push('Morgana');
-  if (pub.extraRoles?.mordred) pills.push('Mordred');
-  if (pub.extraRoles?.oberon) pills.push('Oberon');
+  if (effective.morgana) pills.push('Morgana');
+  if (effective.mordred) pills.push('Mordred');
+  if (effective.oberon) pills.push('Oberon');
   return `
     <div class="text-center mt-3">
       <p class="text-sm text-white/70">${total} at the table — ${loyal} loyal, ${evil} sworn to evil.</p>
@@ -2724,6 +2825,24 @@ function startLobbyPoll() {
         }
         // Single source of truth: KV room is authoritative
         lobbyRoomCache = room;
+        // Auto-trim extra evil if player count now over limit (e.g., kicked down to 5)
+        try {
+          const maxEvil = getMaxExtraEvil((room.players||[]).length);
+          const enabledEvil = ['morgana','mordred','oberon'].filter(k=> !!(room.extraRoles||{})[k]).length;
+          if (enabledEvil > maxEvil) {
+            const effective = getEffectiveExtraRoles(room.players.length, room.extraRoles);
+            room.extraRoles = effective;
+            lobbyRoomCache.extraRoles = effective;
+            if (!isJoinerMode) {
+              lobbyDraft.extraRoles = effective;
+              saveLobbyDraft();
+              try{ await net.pushRoom(lobbyDraft.roomCode, { extraRoles: effective }); }catch(_){}
+              toast(`Trimmed evil extras to ${maxEvil} for ${room.players.length} players`,'default');
+            } else {
+              lobbyDraft.extraRoles = effective;
+            }
+          }
+        } catch(_){}
         // Keep lobbyDraft in sync for host fallback / offline
         if (!isJoinerMode) {
           lobbyDraft.players = room.players.map(p=>({id:p.id, name:p.name, isBot:!!p.isBot}));
@@ -3959,69 +4078,43 @@ function bindDynamicEvents(pub){
     document.querySelectorAll('[data-extra]')?.forEach(btn=>{
       btn.addEventListener('click', async ()=>{
         const key=btn.dataset.extra;
-        lobbyDraft.extraRoles[key]=!lobbyDraft.extraRoles[key];
-        saveLobbyDraft();
-        try { await syncExtraRolesToServer(); } catch(_){}
+        const room = lobbyRoomCache || await net.getRoomAsync(lobbyDraft.roomCode).catch(()=>null) || { code: lobbyDraft.roomCode, players: lobbyDraft.players, extraRoles: {...lobbyDraft.extraRoles} };
+        room.extraRoles = room.extraRoles || {...lobbyDraft.extraRoles};
+        const isEvil = ['morgana','mordred','oberon'].includes(key);
+        const wasActive = !!room.extraRoles[key];
+        if (!wasActive && isEvil) {
+          const max = getMaxExtraEvil((room.players||[]).length);
+          const enabled = ['morgana','mordred','oberon'].filter(k=> !!room.extraRoles[k]).length;
+          if (enabled >= max) {
+            toast(`Max ${max} evil extra for ${(room.players||[]).length} players — remove one first`,'error');
+            return;
+          }
+        }
+        room.extraRoles[key]=!room.extraRoles[key];
+        try {
+          await net.pushRoom(lobbyDraft.roomCode, { extraRoles: room.extraRoles });
+          lobbyRoomCache = await net.getRoomAsync(lobbyDraft.roomCode).catch(()=>room);
+          lobbyDraft.extraRoles = lobbyRoomCache.extraRoles || room.extraRoles;
+          saveLobbyDraft();
+        } catch(e){ console.warn(e); }
         render();
       });
-    });
-    document.getElementById('btn-toggle-options')?.addEventListener('click', ()=>{
-      const p=document.getElementById('panel-extra-roles');
-      if(p) p.classList.toggle('hidden');
-    });
-    document.getElementById('btn-lobby-back')?.addEventListener('click', ()=>{
-      showConfirm({ title:'Back to menu?', body:'Leave this lobby and go back to Pick a game? This will close the room for everyone.', confirmText:'Back to menu', variant:'danger', onConfirm: async ()=>{
-        const code=lobbyDraft.roomCode;
-        if (!isJoinerMode) {
-          try { await net.deleteRoom(code); } catch(_){}
-          try { localStorage.removeItem('avalon:lobby:'+code); }catch(_){}
-          try { localStorage.removeItem('avalon:lastRoomCode'); }catch(_){}
-          stopLobbyPoll();
-          if (roomUnsub) try{ roomUnsub(); }catch(_){}
-          roomUnsub=null;
-        } else {
-          if (hasJoined && myId) try{ net.leaveRoom(code, myId); }catch(_){}
-          hasJoined=false;
-          isJoinerMode=false;
-          try{ localStorage.removeItem('avalon:myName:'+code); }catch(_){}
-          try{ localStorage.removeItem('avalon:myId:'+code); }catch(_){}
-          history.replaceState(null,'',window.location.pathname);
-          stopLobbyPoll();
-        }
-        uiMode='HOME'; showGamePopup=false; lobbyDraft=defaultLobby(); queueRender();
-      }});
-    });
-    document.getElementById('btn-lobby-help')?.addEventListener('click', ()=>{ document.getElementById('rules-dialog')?.showModal(); });
-    document.getElementById('btn-change-game')?.addEventListener('click', ()=>{
-      showConfirm({ title:'Change game?', body:'Go back to Pick a game? Your lobby is kept.', confirmText:'Pick a game', onConfirm:()=>{ uiMode='HOME'; showGamePopup=false; queueRender(); }});
-    });
-
-    document.getElementById('btn-start')?.addEventListener('click', async ()=>{
+    });    document.getElementById('btn-start')?.addEventListener('click', async ()=>{
       try {
-        // Fetch latest room to include any joiners — union by name to avoid losing bots or joiners
-        let latestPlayers = lobbyDraft.players.slice();
-        try {
-          const room = await net.getRoomAsync(lobbyDraft.roomCode);
-          if (room && room.players && room.players.length) {
-            const serverPlayers = room.players.map(p=> ({ name: p.name, isBot: !!p.isBot }));
-            const seen = new Set(latestPlayers.map(p=>p.name));
-            for (const p of serverPlayers) {
-              if (!seen.has(p.name)) { latestPlayers.push({ name: p.name, isBot: !!p.isBot }); seen.add(p.name); }
-            }
-            // If we added any server players not in local, persist
-            if (latestPlayers.length !== lobbyDraft.players.length) {
-              lobbyDraft.players = latestPlayers.slice();
-              saveLobbyDraft();
-            }
-            // If local had players server missed (e.g., bots added just before start), push union back
-            const serverNames = new Set(serverPlayers.map(p=>p.name));
-            const hasLocalOnly = latestPlayers.some(p=> !serverNames.has(p.name));
-            if (hasLocalOnly) {
-              await net.pushRoom(lobbyDraft.roomCode, { players: latestPlayers.map((p,i)=>({id:`lobby_${i}_${p.name}`, name:p.name, isBot:!!p.isBot})) });
-            }
-          }
-        } catch(_){ latestPlayers = lobbyDraft.players.slice(); }
-        const players=latestPlayers.map((p,i)=>({ id:`p${i}_${Date.now().toString(36).slice(-3)}_${Math.random().toString(36).slice(2,5)}`, name: String(p.name).trim() || `Player ${i+1}`, isBot: !!p.isBot }));
+        // Single source of truth: KV room
+        const room = lobbyRoomCache || await net.getRoomAsync(lobbyDraft.roomCode).catch(()=>null) || { code: lobbyDraft.roomCode, players: lobbyDraft.players, extraRoles: lobbyDraft.extraRoles };
+        const latestPlayers = (room.players || []).map(p=>({ id: p.id, name: p.name, isBot: !!p.isBot }));
+        const effectiveOpts = getEffectiveExtraRoles(latestPlayers.length, room.extraRoles || lobbyDraft.extraRoles);
+        // If capped, update lobby to reflect effective
+        if (JSON.stringify(effectiveOpts) !== JSON.stringify(room.extraRoles || lobbyDraft.extraRoles)) {
+          room.extraRoles = effectiveOpts;
+          try{ await net.pushRoom(lobbyDraft.roomCode, { extraRoles: effectiveOpts }); }catch(_){}
+          lobbyRoomCache = room;
+          lobbyDraft.extraRoles = effectiveOpts;
+          saveLobbyDraft();
+          toast(`Balanced roles for ${latestPlayers.length} players`,'default');
+        }
+        const players=latestPlayers.map((p,i)=>({ id: p.id || `p${i}_${Date.now().toString(36).slice(-3)}_${Math.random().toString(36).slice(2,5)}`, name: String(p.name).trim() || `Player ${i+1}`, isBot: !!p.isBot }));
         const names=players.map(p=>p.name);
         if (new Set(names).size!==names.length) throw new Error('Duplicate names — make each unique');
         if (names.some(n=>n.length>16)) throw new Error('Names max 16 chars');
@@ -4036,11 +4129,11 @@ function bindDynamicEvents(pub){
           players.forEach(p=> nameToId[p.name] = p.id);
           localStorage.setItem('avalon:nameToId:'+lobbyDraft.roomCode, JSON.stringify(nameToId));
         } catch(_){}
-        dispatch({ type:'SETUP_GAME', payload:{ players, opts: lobbyDraft.extraRoles, roomCode: lobbyDraft.roomCode }});
+        dispatch({ type:'SETUP_GAME', payload:{ players, opts: effectiveOpts, roomCode: lobbyDraft.roomCode }});
         try {
           await net.createRoom(lobbyDraft.roomCode, players[0]);
           const roomPlayers = players.map(p=>({id:p.id, name:p.name, isBot:p.isBot}));
-          await net.pushRoom(lobbyDraft.roomCode, { players: roomPlayers, state, hostId: players[0].id });
+          await net.pushRoom(lobbyDraft.roomCode, { players: roomPlayers, state, hostId: players[0].id, extraRoles: effectiveOpts });
           // Host must also subscribe to game updates (so it sees joiner votes)
           stopLobbyPoll();
           if (roomUnsub) try{ roomUnsub(); }catch(_){}
