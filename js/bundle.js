@@ -2727,7 +2727,7 @@ function defaultLobby() {
       const saved = JSON.parse(raw);
       if (saved && Array.isArray(saved.players) && saved.extraRoles) {
         ensureLobbyIds(saved.players);
-        return { roomCode: code, players: saved.players, extraRoles: saved.extraRoles };
+        return { roomCode: code, players: saved.players, extraRoles: saved.extraRoles, gameId: saved.gameId || 'quest-of-shadows' };
       }
     }
   } catch(_){}
@@ -2737,6 +2737,7 @@ function defaultLobby() {
       { id: lobbyPlayerId(), name: 'Lucky', isBot: false },
     ],
     extraRoles: { percival: true, morgana: true, mordred: false, oberon: false },
+    gameId: 'quest-of-shadows',
   };
 }
 
@@ -2744,7 +2745,7 @@ function persistLobbyCode(code) {
   try { localStorage.setItem('avalon:lastRoomCode', code); } catch(_) {}
 }
 function saveLobbyDraft() {
-  try { ensureLobbyIds(lobbyDraft.players); localStorage.setItem('avalon:lobby:' + lobbyDraft.roomCode, JSON.stringify({ players: lobbyDraft.players, extraRoles: lobbyDraft.extraRoles })); } catch(_){}
+  try { ensureLobbyIds(lobbyDraft.players); localStorage.setItem('avalon:lobby:' + lobbyDraft.roomCode, JSON.stringify({ players: lobbyDraft.players, extraRoles: lobbyDraft.extraRoles, gameId: lobbyDraft.gameId })); } catch(_){}
 }
 async function syncLobbyToServer() {
   saveLobbyDraft();
@@ -3134,11 +3135,14 @@ function buildLayout(pub){
           roomCode: room.code || lobbyDraft.roomCode,
           playersDraft: hostPlayers.map(p=> ({id:p.id, name:p.name, isBot:!!p.isBot})),
           extraRoles: room.extraRoles || lobbyDraft.extraRoles,
+          gameId: room.gameId || lobbyDraft.gameId || 'quest-of-shadows',
           myName: joinedName,
           myId: joinedId,
           inviteLink,
           isJoiner: true,
           joinedName: joinedName,
+          joinedId: joinedId,
+          renderGameOptions: () => renderAvalonOptions(room.extraRoles || lobbyDraft.extraRoles, hostPlayers.length, true),
         };
         return renderLobby(ctx);
       }
@@ -4099,7 +4103,35 @@ function bindDynamicEvents(pub){
         } catch(e){ console.warn(e); }
         render();
       });
-    });    document.getElementById('btn-start')?.addEventListener('click', async ()=>{
+    });
+    // Change game in lobby — no need to remake room
+    document.getElementById('select-game')?.addEventListener('change', async (e)=>{
+      const newGameId = e.target.value;
+      const curGameId = (lobbyRoomCache?.gameId || lobbyDraft.gameId || 'quest-of-shadows');
+      if (!newGameId || newGameId === curGameId) return;
+      if (isJoinerMode) return toast('Only host can change game','default');
+      const room = lobbyRoomCache || await net.getRoomAsync(lobbyDraft.roomCode).catch(()=>null) || { code: lobbyDraft.roomCode, players: lobbyDraft.players, extraRoles: lobbyDraft.extraRoles, gameId: curGameId };
+      const game = getGame(newGameId);
+      room.gameId = newGameId;
+      room.gameOptions = game ? {...game.defaultOptions} : {};
+      if (newGameId === 'quest-of-shadows') {
+        room.extraRoles = {...game.defaultOptions};
+        lobbyDraft.extraRoles = {...game.defaultOptions};
+      } else {
+        room.extraRoles = undefined;
+      }
+      room.state = null;
+      try {
+        await net.pushRoom(lobbyDraft.roomCode, room);
+        lobbyRoomCache = room;
+        lobbyDraft.gameId = newGameId;
+        lobbyDraft.extraRoles = room.extraRoles || room.gameOptions;
+        saveLobbyDraft();
+        toast(`Switched to ${game ? game.label : newGameId}`,'success');
+      } catch(err){ toast('Failed to change game','error'); }
+      queueRender();
+    });
+    document.getElementById('btn-start')?.addEventListener('click', async ()=>{
       try {
         // Single source of truth: KV room
         const room = lobbyRoomCache || await net.getRoomAsync(lobbyDraft.roomCode).catch(()=>null) || { code: lobbyDraft.roomCode, players: lobbyDraft.players, extraRoles: lobbyDraft.extraRoles };

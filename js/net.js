@@ -109,7 +109,11 @@ export async function pushRoom(code, roomData) {
   } else if (!mergedPlayers && base.players) {
     mergedPlayers = base.players;
   }
+  // gameId/gameOptions/extraRoles already handled via spread, but ensure they persist if not in roomData
   const merged = { ...base, ...roomData, players: mergedPlayers, state: mergedState, code, updatedAt: Date.now() };
+  if (roomData.gameId === undefined && base.gameId !== undefined) merged.gameId = base.gameId;
+  if (roomData.gameOptions === undefined && base.gameOptions !== undefined) merged.gameOptions = base.gameOptions;
+  if (roomData.extraRoles === undefined && base.extraRoles !== undefined) merged.extraRoles = base.extraRoles;
   setLocalRoom(code, merged);
   try {
     await fetch(`/api/room/${code}`, {

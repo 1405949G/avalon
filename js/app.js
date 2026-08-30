@@ -4,12 +4,15 @@
  * Keeps pure reducer orchestration + backend abstraction via net.js
  */
 import { PHASES, TIMER_SECONDS, REVEAL_ANIM_MS, generateRoomCode, isValidRoomCode, EXTRA_ROLES, getMaxExtraEvil, getEffectiveExtraRoles } from './config.js';
+import { getGame } from './games/registry.js';
 import { createInitialState, reducer, getPublicState, getPrivateState, getAIView, getVision } from './state.js';
 import * as storage from './storage.js';
 import * as net from './net.js';
 import * as ai from './ai.js';
 import { renderLog } from './ui/log.js';
-import { renderQuestTrack, renderProposalTracker, renderTimer, renderPlayerGrid, renderLobby, renderPrivateRole, renderRoleReveal, renderExactHeader, renderExactQuestTrack, renderExactAllegiance, renderExactTableSummary, renderExactAvatarRow, renderExactBottomButton, renderHome, renderGamePopup, renderJoinCodeScreen } from './ui/components.js';
+import { renderQuestTrack, renderProposalTracker, renderTimer, renderPlayerGrid, renderPrivateRole, renderRoleReveal, renderExactHeader, renderExactQuestTrack, renderExactAllegiance, renderExactTableSummary, renderExactAvatarRow, renderExactBottomButton, renderHome, renderGamePopup, renderJoinCodeScreen } from './ui/components.js';
+import { renderLobby } from './lobby/ui.js';
+import { renderAvalonOptions } from './games/avalon/ui.js';
 import { showRoleReveal, showQuestVote, showConfirm } from './ui/modals.js';
 
 try { window.__AVALON_BOOTED__ = true; } catch(_) {}
@@ -58,7 +61,7 @@ function defaultLobby() {
       const saved = JSON.parse(raw);
       if (saved && Array.isArray(saved.players) && saved.extraRoles) {
         ensureLobbyIds(saved.players);
-        return { roomCode: code, players: saved.players, extraRoles: saved.extraRoles };
+        return { roomCode: code, players: saved.players, extraRoles: saved.extraRoles, gameId: saved.gameId || 'quest-of-shadows' };
       }
     }
   } catch(_){}
@@ -68,6 +71,7 @@ function defaultLobby() {
       { id: lobbyPlayerId(), name: 'Lucky', isBot: false },
     ],
     extraRoles: { percival: true, morgana: true, mordred: false, oberon: false },
+    gameId: 'quest-of-shadows',
   };
 }
 
@@ -75,7 +79,7 @@ function persistLobbyCode(code) {
   try { localStorage.setItem('avalon:lastRoomCode', code); } catch(_) {}
 }
 function saveLobbyDraft() {
-  try { ensureLobbyIds(lobbyDraft.players); localStorage.setItem('avalon:lobby:' + lobbyDraft.roomCode, JSON.stringify({ players: lobbyDraft.players, extraRoles: lobbyDraft.extraRoles })); } catch(_){}
+  try { ensureLobbyIds(lobbyDraft.players); localStorage.setItem('avalon:lobby:' + lobbyDraft.roomCode, JSON.stringify({ players: lobbyDraft.players, extraRoles: lobbyDraft.extraRoles, gameId: lobbyDraft.gameId })); } catch(_){}
 }
 async function syncLobbyToServer() {
   saveLobbyDraft();
@@ -465,11 +469,14 @@ function buildLayout(pub){
           roomCode: room.code || lobbyDraft.roomCode,
           playersDraft: hostPlayers.map(p=> ({id:p.id, name:p.name, isBot:!!p.isBot})),
           extraRoles: room.extraRoles || lobbyDraft.extraRoles,
+          gameId: room.gameId || lobbyDraft.gameId || 'quest-of-shadows',
           myName: joinedName,
           myId: joinedId,
           inviteLink,
           isJoiner: true,
           joinedName: joinedName,
+          joinedId: joinedId,
+          renderGameOptions: () => renderAvalonOptions(room.extraRoles || lobbyDraft.extraRoles, hostPlayers.length, true),
         };
         return renderLobby(ctx);
       }
@@ -506,9 +513,11 @@ function buildLayout(pub){
       roomCode: room.code || lobbyDraft.roomCode,
       playersDraft: (room.players || lobbyDraft.players).map(p=>({id:p.id, name:p.name, isBot:!!p.isBot})),
       extraRoles: room.extraRoles || lobbyDraft.extraRoles,
+      gameId: room.gameId || lobbyDraft.gameId || 'quest-of-shadows',
       myName: (room.players && room.players[0]?.name) || lobbyDraft.players[0]?.name || 'Lucky',
       myId: room.players && room.players[0]?.id,
       inviteLink,
+      renderGameOptions: () => renderAvalonOptions(room.extraRoles || lobbyDraft.extraRoles, (room.players||[]).length, false),
     };
     return renderLobby(ctx);
   }
@@ -1450,7 +1459,35 @@ function bindDynamicEvents(pub){
         } catch(e){ console.warn(e); }
         render();
       });
-    });    document.getElementById('btn-start')?.addEventListener('click', async ()=>{
+    });
+    // Change game in lobby — no need to remake room
+    document.getElementById('select-game')?.addEventListener('change', async (e)=>{
+      const newGameId = e.target.value;
+      const curGameId = (lobbyRoomCache?.gameId || lobbyDraft.gameId || 'quest-of-shadows');
+      if (!newGameId || newGameId === curGameId) return;
+      if (isJoinerMode) return toast('Only host can change game','default');
+      const room = lobbyRoomCache || await net.getRoomAsync(lobbyDraft.roomCode).catch(()=>null) || { code: lobbyDraft.roomCode, players: lobbyDraft.players, extraRoles: lobbyDraft.extraRoles, gameId: curGameId };
+      const game = getGame(newGameId);
+      room.gameId = newGameId;
+      room.gameOptions = game ? {...game.defaultOptions} : {};
+      if (newGameId === 'quest-of-shadows') {
+        room.extraRoles = {...game.defaultOptions};
+        lobbyDraft.extraRoles = {...game.defaultOptions};
+      } else {
+        room.extraRoles = undefined;
+      }
+      room.state = null;
+      try {
+        await net.pushRoom(lobbyDraft.roomCode, room);
+        lobbyRoomCache = room;
+        lobbyDraft.gameId = newGameId;
+        lobbyDraft.extraRoles = room.extraRoles || room.gameOptions;
+        saveLobbyDraft();
+        toast(`Switched to ${game ? game.label : newGameId}`,'success');
+      } catch(err){ toast('Failed to change game','error'); }
+      queueRender();
+    });
+    document.getElementById('btn-start')?.addEventListener('click', async ()=>{
       try {
         // Single source of truth: KV room
         const room = lobbyRoomCache || await net.getRoomAsync(lobbyDraft.roomCode).catch(()=>null) || { code: lobbyDraft.roomCode, players: lobbyDraft.players, extraRoles: lobbyDraft.extraRoles };
